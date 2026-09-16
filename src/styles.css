@@ -1,22 +1,103 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif;
+  --color-paper: #f3efe6;
+  --color-paper-2: #e7e1d3;
+  --color-surface: #faf7f0;
   --color-ink: #1a1714;
-  --color-paper: #f3efe8;
-  --color-paper-2: #e8e2d6;
-  --color-surface: #faf8f4;
-  --color-forest: #2f4a3c;
-  --color-muted: #6b645a;
-  --color-faint: #9a9286;
-  --color-border: #ddd4c6;
-  --color-ok: #2f6b4f;
-  --color-warn: #a15c12;
-  --color-danger: #9b2c2c;
-  --color-info: #2c5282;
+  --color-ink-2: #2c2824;
+  --color-muted: #6b6560;
+  --color-faint: #938c83;
+  --color-forest: #2c4a3e;
+  --color-forest-2: #3c5d50;
+  --color-border: #d4cdc0;
+  --color-danger: #8a3030;
+  --color-warn: #8a5a2b;
+  --color-caution: #a17c22;
+  --color-ok: #2f5d45;
+  --color-info: #3d4a5c;
+
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Newsreader", "Iowan Old Style", Palatino, Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+
+  --shadow-border:
+    0px 0px 0px 1px rgba(26, 23, 20, 0.06), 0px 1px 2px -1px rgba(26, 23, 20, 0.06),
+    0px 2px 4px 0px rgba(26, 23, 20, 0.04);
+  --shadow-border-hover:
+    0px 0px 0px 1px rgba(26, 23, 20, 0.1), 0px 1px 2px -1px rgba(26, 23, 20, 0.08),
+    0px 2px 6px 0px rgba(26, 23, 20, 0.06);
 }
 
-button,
-[role="button"] {
-  cursor: pointer;
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes folia-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.folia-enter {
+  animation: folia-enter 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.folia-enter-2 {
+  animation-delay: 60ms;
+}
+
+.folia-enter-3 {
+  animation-delay: 120ms;
+}
+
+.folia-enter-4 {
+  animation-delay: 180ms;
 }
