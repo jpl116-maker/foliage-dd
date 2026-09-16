@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif;
+  --color-ink: #1a1714;
+  --color-paper: #f3efe8;
+  --color-paper-2: #e8e2d6;
+  --color-surface: #faf8f4;
+  --color-forest: #2f4a3c;
+  --color-muted: #6b645a;
+  --color-faint: #9a9286;
+  --color-border: #ddd4c6;
+  --color-ok: #2f6b4f;
+  --color-warn: #a15c12;
+  --color-danger: #9b2c2c;
+  --color-info: #2c5282;
+}
+
+button,
+[role="button"] {
+  cursor: pointer;
+}
