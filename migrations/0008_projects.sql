@@ -16,5 +16,10 @@ create table if not exists project_members (
   primary key (project_id, user_id)
 );
 
+create index if not exists project_members_user_idx on project_members (user_id);
+
 alter table data_room_folders
   add column if not exists project_id text not null default 'default';
+
+create index if not exists data_room_folders_project_idx
+  on data_room_folders (project_id);

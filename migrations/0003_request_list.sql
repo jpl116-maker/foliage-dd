@@ -25,3 +25,9 @@ create table if not exists dd_requests (
   sort_order integer not null default 0,
   primary key (workspace, id)
 );
+
+create index if not exists dd_categories_ws_idx
+  on dd_categories (workspace, sort_order);
+
+create index if not exists dd_requests_ws_idx
+  on dd_requests (workspace, sort_order);

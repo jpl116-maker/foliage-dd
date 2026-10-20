@@ -21,3 +21,5 @@ create table if not exists dd_issues (
   sort_order integer not null default 0,
   primary key (workspace, id)
 );
+
+create index if not exists dd_issues_workspace_idx on dd_issues (workspace, sort_order);
