@@ -57,6 +57,7 @@ export const ensureNamedAdmin = createServerFn({ method: "POST" }).handler(
       `;
     }
     if (!NAMED_ADMIN_PASSWORD) return { ok: true as const };
+    if (!NAMED_ADMIN_PASSWORD) return { ok: true as const };
     const passwordHash = await hashPassword(NAMED_ADMIN_PASSWORD);
     const accounts = await q<{ id: string }>`
       select id from account
