@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: #f3efe6;
-  --color-paper-2: #e7e1d3;
-  --color-surface: #faf7f0;
-  --color-ink: #1a1714;
-  --color-ink-2: #2c2824;
-  --color-muted: #6b6560;
-  --color-faint: #938c83;
-  --color-forest: #2c4a3e;
-  --color-forest-2: #3c5d50;
-  --color-border: #d4cdc0;
+  --color-paper: #f7f7f8;
+  --color-paper-2: #eceef1;
+  --color-surface: #ffffff;
+  --color-ink: #1a1d24;
+  --color-ink-2: #2a2f38;
+  --color-muted: #6b7280;
+  --color-faint: #9aa1ab;
+  --color-forest: #4169e1;
+  --color-forest-2: #2f54c8;
+  --color-border: #e2e4e8;
   --color-danger: #8a3030;
   --color-warn: #8a5a2b;
   --color-caution: #a17c22;
   --color-ok: #2f5d45;
-  --color-info: #3d4a5c;
+  --color-info: #4169e1;
 
-  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --font-display: "Newsreader", "Iowan Old Style", Palatino, Georgia, serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-sans: Verdana, Geneva, Tahoma, sans-serif;
+  --font-display: Verdana, Geneva, Tahoma, sans-serif;
+  --font-mono: "Courier New", Courier, monospace;
 
   --radius-xs: 4px;
   --radius-sm: 6px;
@@ -29,23 +29,51 @@
   --radius-2xl: 28px;
 
   --shadow-border:
-    0px 0px 0px 1px rgba(26, 23, 20, 0.06), 0px 1px 2px -1px rgba(26, 23, 20, 0.06),
-    0px 2px 4px 0px rgba(26, 23, 20, 0.04);
+    0px 0px 0px 1px rgba(26, 29, 36, 0.06), 0px 1px 2px -1px rgba(26, 29, 36, 0.05),
+    0px 2px 4px 0px rgba(26, 29, 36, 0.04);
   --shadow-border-hover:
-    0px 0px 0px 1px rgba(26, 23, 20, 0.1), 0px 1px 2px -1px rgba(26, 23, 20, 0.08),
-    0px 2px 6px 0px rgba(26, 23, 20, 0.06);
+    0px 0px 0px 1px rgba(26, 29, 36, 0.1), 0px 1px 2px -1px rgba(26, 29, 36, 0.07),
+    0px 2px 6px 0px rgba(26, 29, 36, 0.05);
 }
 
 @layer base {
   html {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    font-family: Verdana, Geneva, Tahoma, sans-serif;
+    -webkit-font-smoothing: auto;
+    -moz-osx-font-smoothing: auto;
+  }
+
+  body,
+  button,
+  input,
+  select,
+  textarea,
+  optgroup,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  p,
+  a,
+  label,
+  li,
+  td,
+  th {
+    font-family: Verdana, Geneva, Tahoma, sans-serif;
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: "Courier New", Courier, monospace;
   }
 
   body {
     background: var(--color-paper);
     color: var(--color-ink);
-    font-family: var(--font-sans);
     line-height: 1.5;
   }
 
