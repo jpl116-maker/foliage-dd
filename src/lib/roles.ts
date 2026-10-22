@@ -22,7 +22,8 @@ export type RoleAction =
   | "deleteComments"
   | "unlinkRequestFiles"
   | "switchWorkspace"
-  | "assignFiles";
+  | "assignFiles"
+  | "askDataRoom";
 
 const FIRM: FoliaRole[] = ["admin", "reviewer"];
 
@@ -42,6 +43,7 @@ const ALLOW: Record<RoleAction, FoliaRole[]> = {
   unlinkRequestFiles: FIRM,
   switchWorkspace: ["admin"],
   assignFiles: ["admin"],
+  askDataRoom: FIRM,
 };
 
 export function isFoliaRole(value: string): value is FoliaRole {

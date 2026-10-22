@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { assertProjectAccess } from "@/lib/projects-db";
+import { can } from "@/lib/roles";
 import { roomRoot, type WorkspaceId } from "@/lib/workspace";
 
 const workspaceSchema = z.enum(["entity", "asset"]);
@@ -145,7 +146,10 @@ export const askDataRoom = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await assertProjectAccess(context.userId, data.projectId);
+    const access = await assertProjectAccess(context.userId, data.projectId);
+    if (!can(access.role, "askDataRoom")) {
+      return { ok: false as const, error: "Grok is not available for this account." };
+    }
     const files = await catalogFor(data.projectId, data.workspace);
     if (files.length === 0) {
       return {

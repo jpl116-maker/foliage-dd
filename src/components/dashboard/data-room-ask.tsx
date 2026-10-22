@@ -4,10 +4,12 @@ import { FileText, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useProject } from "@/components/project/project-provider";
+import { useRole } from "@/components/auth/role-provider";
 import { askDataRoom, type AskRoomFile, type SearchIntensity } from "@/lib/data-room-ask";
 import { useDdStore } from "@/lib/store";
 
 export function DataRoomAsk() {
+  const { can } = useRole();
   const { slug, id: projectId } = useProject();
   const workspace = useDdStore((s) => s.workspace);
   const [prompt, setPrompt] = useState("");
@@ -43,6 +45,8 @@ export function DataRoomAsk() {
       setBusy(false);
     }
   }
+
+  if (!can("askDataRoom")) return null;
 
   return (
     <div className="mb-3">
