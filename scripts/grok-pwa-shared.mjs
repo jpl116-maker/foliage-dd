@@ -381,6 +381,13 @@ export function grokOgHeadTags({
   return tags;
 }
 
+function stripExternalFontLinks(html) {
+  return String(html).replace(
+    /<link\b[^>]*\bhref\s*=\s*["']https?:\/\/fonts\.(?:googleapis|gstatic)\.com[^"']*["'][^>]*>/gi,
+    "",
+  );
+}
+
 function stripGrokExtensionsScript(html) {
   return String(html).replace(
     /<script\b[^>]*\bsrc\s*=\s*["'][^"']*\/grok-app-builder\/extensions\.js[^"']*["'][^>]*>\s*<\/script>/gi,
@@ -445,8 +452,9 @@ export function injectGrokPwaHead(html, ctx = {}) {
     host,
     documentTitle,
   );
-  let next = stripShareMetaTags(html);
-  if (!readGrokExtensionsEnabled()) next = stripGrokExtensionsScript(next);
+  let next = stripExternalFontLinks(stripShareMetaTags(html));
+  const extensions = ctx.extensions !== false && readGrokExtensionsEnabled();
+  if (!extensions) next = stripGrokExtensionsScript(next);
 
   const missing = grokPwaHeadTags(appName)
     .filter(([key]) => {
@@ -461,7 +469,7 @@ export function injectGrokPwaHead(html, ctx = {}) {
     grokOgHeadTags({ host, appName, site, documentTitle, cwd }).join(""),
   );
 
-  if (readGrokExtensionsEnabled() && !next.includes("/grok-app-builder/extensions.js")) {
+  if (extensions && !next.includes("/grok-app-builder/extensions.js")) {
     missing.push(...grokExtensionsHeadTags(projectId));
   } else if (projectId && !next.includes('name="grok-project-id"')) {
     missing.push(`<meta name="grok-project-id" content="${escapeHtml(projectId)}">`);
@@ -512,6 +520,7 @@ export function createHeadInjector(ctx = {}) {
       host: normalized.host,
       cwd: normalized.cwd,
       site: normalized.site,
+      extensions: ctx.extensions,
     });
 
   return {

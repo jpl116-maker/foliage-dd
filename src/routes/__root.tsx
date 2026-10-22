@@ -3,6 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { RequireAuth } from "@/components/auth/require-auth";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "sonner";
+import { CONTENT_SECURITY_POLICY } from "@/lib/content-security-policy";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "Foliage";
@@ -16,7 +17,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#F7F7F8" },
       {
         httpEquiv: "Content-Security-Policy",
-        content: "upgrade-insecure-requests",
+        content: CONTENT_SECURITY_POLICY,
       },
       {
         name: "description",

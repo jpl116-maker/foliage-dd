@@ -18,6 +18,7 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
+import { CONTENT_SECURITY_POLICY } from "./src/lib/content-security-policy";
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
@@ -74,7 +75,7 @@ function finishVercelOutput() {
               headers: {
                 "strict-transport-security":
                   "max-age=63072000; includeSubDomains; preload",
-                "content-security-policy": "upgrade-insecure-requests",
+                "content-security-policy": CONTENT_SECURITY_POLICY,
                 "x-content-type-options": "nosniff",
                 "referrer-policy": "strict-origin-when-cross-origin",
               },
