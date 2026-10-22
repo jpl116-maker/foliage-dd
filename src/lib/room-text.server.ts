@@ -1,16 +1,12 @@
 import { inflateRawSync } from "node:zlib";
 
-const MAX_CHARS = 6000;
-
-function clip(text: string, max = MAX_CHARS) {
-  const clean = text
+function clean(text: string) {
+  return text
     .replace(/\u0000/g, "")
     .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  if (clean.length <= max) return clean;
-  return `${clean.slice(0, max)}\n[truncated]`;
 }
 
 async function pdfText(bytes: Buffer) {
@@ -18,7 +14,7 @@ async function pdfText(bytes: Buffer) {
     const { extractText } = await import("unpdf");
     const extracted = await extractText(new Uint8Array(bytes), { mergePages: true });
     const raw = Array.isArray(extracted.text) ? extracted.text.join("\n\n") : extracted.text;
-    return clip(raw ?? "", 20000);
+    return clean(raw ?? "");
   } catch {
     return "";
   }
@@ -63,7 +59,7 @@ function docxText(bytes: Buffer) {
     .replace(new RegExp("&" + "lt;", "g"), "<")
     .replace(new RegExp("&" + "gt;", "g"), ">")
     .replace(new RegExp("&" + "quot;", "g"), '"');
-  return clip(text);
+  return clean(text);
 }
 
 async function sheetText(bytes: Buffer, name: string) {
@@ -80,13 +76,11 @@ async function sheetText(bytes: Buffer, name: string) {
   };
   const wb = XLSX.read(bytes, { type: "buffer", cellDates: true });
   const chunks: string[] = [];
-  for (const sheetName of wb.SheetNames.slice(0, 4)) {
+  for (const sheetName of wb.SheetNames) {
     const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName] ?? {}, { blankrows: false });
-    const lines = csv.split(/\r?\n/).slice(0, 40);
-    chunks.push(`# ${sheetName}\n${lines.join("\n")}`);
-    if (chunks.join("\n").length > MAX_CHARS) break;
+    chunks.push(`# ${sheetName}\n${csv}`);
   }
-  return clip(chunks.join("\n\n") || name);
+  return clean(chunks.join("\n\n") || name);
 }
 
 export async function extractRoomText(name: string, mimeType: string, bytes: Buffer) {
@@ -101,7 +95,7 @@ export async function extractRoomText(name: string, mimeType: string, bytes: Buf
     lower.includes("json") ||
     mimeType === "text/csv"
   ) {
-    return clip(bytes.toString("utf8"));
+    return clean(bytes.toString("utf8"));
   }
   if (
     lower.endsWith(".xlsx") ||

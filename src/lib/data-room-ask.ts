@@ -163,7 +163,7 @@ export const askDataRoom = createServerFn({ method: "POST" })
     try {
       const raw = await complete(
         apiKey,
-        `You answer questions about one due diligence data room. Reply with JSON only: {"answer": string or null, "read": string[], "open": string[]}. read is up to 4 catalog ids whose text you need. Use an empty read list when names and folders are enough. open is the ids the user should see opened in the data room. Never invent ids. Catalog columns are id, folder, name:\n${catalogText}${more}`,
+        `You answer questions about one due diligence data room. Reply with JSON only: {"answer": string or null, "read": string[], "open": string[]}. read is up to 6 catalog ids whose full text you need, most relevant first. Use an empty read list only when names and folders are enough. open is the ids the user should see opened in the data room. Never invent ids. Catalog columns are id, folder, name:\n${catalogText}${more}`,
         data.prompt,
         500,
       );
@@ -175,7 +175,7 @@ export const askDataRoom = createServerFn({ method: "POST" })
 
     const readIds = [...new Set(first.read ?? [])]
       .filter((id) => byId.has(id))
-      .slice(0, 4);
+      .slice(0, 6);
 
     let answer = first.answer?.trim() || "";
     let openIds = first.open ?? [];
@@ -183,26 +183,30 @@ export const askDataRoom = createServerFn({ method: "POST" })
     if (readIds.length > 0) {
       const { readFileBytes } = await import("@/lib/data-room");
       const { extractRoomText } = await import("@/lib/room-text.server");
-      const excerpts: string[] = [];
+      const blocks: string[] = [];
+      let remaining = 240_000;
       for (const id of readIds) {
         const file = byId.get(id);
-        if (!file) continue;
+        if (!file || remaining <= 0) continue;
         try {
           const stored = await readFileBytes(id, context.userId);
-          const text = await extractRoomText(stored.name, stored.mimeType, stored.bytes);
-          excerpts.push(
-            `FILE ${file.id}\n${file.folderName} / ${file.name}\n${text || "(no readable text)"}`,
-          );
+          let text = await extractRoomText(stored.name, stored.mimeType, stored.bytes);
+          if (!text) text = "(no readable text)";
+          if (text.length > remaining) {
+            text = `${text.slice(0, remaining)}\n[remainder of this file was not sent]`;
+          }
+          remaining -= text.length;
+          blocks.push(`FILE ${file.id}\n${file.folderName} / ${file.name}\n${text}`);
         } catch {
-          excerpts.push(`FILE ${file.id}\n${file.name}\n(could not read this file)`);
+          blocks.push(`FILE ${file.id}\n${file.name}\n(could not read this file)`);
         }
       }
       try {
         const raw = await complete(
           apiKey,
-          `Reply with JSON only: {"answer": string, "open": string[]}. answer is plain prose for a diligence reviewer, based only on the excerpts. open lists catalog ids to show in the file viewer, including files the user asked to open and files the answer relies on. Allowed ids: ${files.map((file) => file.id).slice(0, 300).join(", ")}`,
-          `Question: ${data.prompt}\n\n${excerpts.join("\n\n")}`,
-          900,
+          `Reply with JSON only: {"answer": string, "open": string[]}. answer is plain prose for a diligence reviewer. Each FILE block is the full extracted text of that data-room file, not an excerpt or sample. Use facts that appear anywhere in that text. Do not say the file or an excerpt lacks information that is present in the text. open lists catalog ids to show in the file viewer, including files the user asked to open and files the answer relies on. Allowed ids: ${files.map((file) => file.id).slice(0, 300).join(", ")}`,
+          `Question: ${data.prompt}\n\n${blocks.join("\n\n")}`,
+          1200,
         );
         const second = parseModelJson(raw);
         if (second.answer?.trim()) answer = second.answer.trim();
