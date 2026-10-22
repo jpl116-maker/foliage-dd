@@ -11,10 +11,6 @@ import {
 } from "@/lib/roles";
 import { uid } from "@/lib/utils";
 
-const NAMED_ADMIN_EMAIL = "admin@users.folia";
-const NAMED_ADMIN_NAME = "Admin";
-const NAMED_ADMIN_PASSWORD = process.env.FOLIAGE_ADMIN_PASSWORD ?? "";
-
 async function sql() {
   const { getSql } = await import("@/lib/db");
   return getSql();
@@ -35,51 +31,6 @@ async function ensureSchema() {
     schemaReady = true;
   }
 }
-
-export const ensureNamedAdmin = createServerFn({ method: "POST" }).handler(
-  async () => {
-    await ensureSchema();
-    const q = await sql();
-    const existing = await q<{ id: string }>`
-      select id from "user" where lower(email) = ${NAMED_ADMIN_EMAIL}
-    `;
-    const userId = existing[0]?.id ?? uid("usr");
-    if (!existing[0]) {
-      await q`
-        insert into "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
-        values (${userId}, ${NAMED_ADMIN_NAME}, ${NAMED_ADMIN_EMAIL}, true, now(), now())
-      `;
-    } else {
-      await q`
-        update "user"
-        set "name" = ${NAMED_ADMIN_NAME}, "updatedAt" = now()
-        where "id" = ${userId}
-      `;
-    }
-    const accounts = await q<{ id: string }>`
-      select id from account
-      where "userId" = ${userId} and "providerId" = 'credential'
-    `;
-    if (!accounts[0] && NAMED_ADMIN_PASSWORD) {
-      const passwordHash = await hashPassword(NAMED_ADMIN_PASSWORD);
-      const accountId = uid("acc");
-      await q`
-        insert into account (
-          "id", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt"
-        )
-        values (
-          ${accountId}, ${userId}, ${"credential"}, ${userId}, ${passwordHash}, now(), now()
-        )
-      `;
-    }
-    await q`
-      insert into folia_roles (user_id, role, updated_at)
-      values (${userId}, ${"admin"}, now())
-      on conflict (user_id) do update set role = ${"admin"}, updated_at = excluded.updated_at
-    `;
-    return { ok: true as const };
-  },
-);
 
 export async function createFoliaAccount(input: {
   username: string;

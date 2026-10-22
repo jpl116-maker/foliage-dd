@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient, authEnabled } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { claimSignupRole, ensureNamedAdmin } from "@/lib/roles-db";
+import { claimSignupRole } from "@/lib/roles-db";
 import { cn } from "@/lib/utils";
 import {
   authErrorMessage,
@@ -28,10 +28,6 @@ function Login() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    void ensureNamedAdmin();
-  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
