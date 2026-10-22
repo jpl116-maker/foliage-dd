@@ -9,7 +9,7 @@ import {
   slugify,
   type Project,
 } from "@/lib/projects";
-import { can, isFoliaRole, type FoliaRole, type RoleAction } from "@/lib/roles";
+import { can, isFoliaRole, ROLE_LABEL, type FoliaRole, type RoleAction } from "@/lib/roles";
 import { createFoliaAccount, siteRoleFor } from "@/lib/roles-db";
 import { uid } from "@/lib/utils";
 import { roomIdPrefix, roomRoot, type WorkspaceId } from "@/lib/workspace";
@@ -17,6 +17,11 @@ import { roomIdPrefix, roomRoot, type WorkspaceId } from "@/lib/workspace";
 async function sql() {
   const { getSql } = await import("@/lib/db");
   return getSql();
+}
+
+async function recordChange(projectId: string, userId: string, summary: string) {
+  const { recordAudit } = await import("@/lib/audit");
+  await recordAudit({ projectId, userId, kind: "change", summary });
 }
 
 let schemaReady = false;
@@ -354,6 +359,7 @@ export const createProject = createServerFn({ method: "POST" })
         })),
       );
     }
+    await recordChange(id, context.userId, "Created this project");
     return {
       id,
       slug,
@@ -379,6 +385,14 @@ export const updateProject = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await assertProjectCan(context.userId, data.projectId, "editMatter");
     const q = await sql();
+    const prior = await q<{
+      name: string;
+      client_name: string;
+      portfolio: string;
+      due_on: string;
+    }>`
+      select name, client_name, portfolio, due_on from projects where id = ${data.projectId}
+    `;
     await q`
       update projects
       set name = ${data.name},
@@ -387,6 +401,21 @@ export const updateProject = createServerFn({ method: "POST" })
           due_on = ${data.dueOn}
       where id = ${data.projectId}
     `;
+    const before = prior[0];
+    if (before) {
+      const bits: string[] = [];
+      if (before.name !== data.name) bits.push("name");
+      if (before.client_name !== data.clientName) bits.push("client");
+      if (before.portfolio !== data.portfolio) bits.push("target");
+      if (before.due_on !== data.dueOn) bits.push("due date");
+      if (bits.length) {
+        await recordChange(
+          data.projectId,
+          context.userId,
+          `Updated the project ${bits.join(", ")}`,
+        );
+      }
+    }
     const entityRoot = roomRoot(data.projectId, "entity");
     const assetRoot = roomRoot(data.projectId, "asset");
     await q`
@@ -407,11 +436,22 @@ export const setProjectWorkspace = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await assertProjectCan(context.userId, data.projectId, "switchWorkspace");
     const q = await sql();
+    const prior = await q<{ workspace: string }>`
+      select workspace from projects where id = ${data.projectId}
+    `;
     await q`
       update projects
       set workspace = ${data.workspace}
       where id = ${data.projectId}
     `;
+    const current = prior[0]?.workspace === "asset" ? "asset" : "entity";
+    if (current !== data.workspace) {
+      await recordChange(
+        data.projectId,
+        context.userId,
+        `Switched the default diligence to ${data.workspace === "asset" ? "Asset" : "Entity"}`,
+      );
+    }
     return { ok: true as const };
   });
 
@@ -469,11 +509,22 @@ export const addProjectMember = createServerFn({ method: "POST" })
       return uname === needle || row.name.toLowerCase() === needle;
     });
     if (!match) throw new Error("No user with that username");
+    const existing = await q<{ role: string }>`
+      select role from project_members
+      where project_id = ${data.projectId} and user_id = ${match.id}
+    `;
     await q`
       insert into project_members (project_id, user_id, role)
       values (${data.projectId}, ${match.id}, ${data.role})
       on conflict (project_id, user_id) do update set role = excluded.role
     `;
+    const username = emailToUsername(match.email) || match.name;
+    const label = ROLE_LABEL[data.role];
+    if (!existing[0]) {
+      await recordChange(data.projectId, context.userId, `Added ${username} as ${label}`);
+    } else if (existing[0].role !== data.role) {
+      await recordChange(data.projectId, context.userId, `Set ${username} to ${label}`);
+    }
     return { ok: true as const };
   });
 
@@ -500,6 +551,11 @@ export const createProjectUser = createServerFn({ method: "POST" })
       values (${data.projectId}, ${created.userId}, ${data.role})
       on conflict (project_id, user_id) do update set role = excluded.role
     `;
+    await recordChange(
+      data.projectId,
+      context.userId,
+      `Created account ${created.username} as ${ROLE_LABEL[data.role]}`,
+    );
     return { username: created.username };
   });
 
@@ -515,6 +571,12 @@ export const setProjectMemberRole = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await assertProjectCan(context.userId, data.projectId, "manageUsers");
     const q = await sql();
+    const prior = await q<{ role: string; name: string; email: string }>`
+      select m.role, u.name, u.email
+      from project_members m
+      join "user" u on u.id = m.user_id
+      where m.project_id = ${data.projectId} and m.user_id = ${data.userId}
+    `;
     if (data.role !== "admin") {
       const admins = await q<{ user_id: string }>`
         select user_id from project_members
@@ -529,6 +591,15 @@ export const setProjectMemberRole = createServerFn({ method: "POST" })
       set role = ${data.role}
       where project_id = ${data.projectId} and user_id = ${data.userId}
     `;
+    const person = prior[0];
+    if (person && person.role !== data.role) {
+      const username = emailToUsername(person.email) || person.name || "a user";
+      await recordChange(
+        data.projectId,
+        context.userId,
+        `Set ${username} to ${ROLE_LABEL[data.role]}`,
+      );
+    }
     return { ok: true as const };
   });
 
@@ -546,10 +617,20 @@ export const removeProjectMember = createServerFn({ method: "POST" })
       throw new Error("You cannot remove yourself");
     }
     const q = await sql();
+    const prior = await q<{ name: string; email: string }>`
+      select u.name, u.email
+      from project_members m
+      join "user" u on u.id = m.user_id
+      where m.project_id = ${data.projectId} and m.user_id = ${data.userId}
+    `;
     await q`
       delete from project_members
       where project_id = ${data.projectId} and user_id = ${data.userId}
     `;
+    if (prior[0]) {
+      const username = emailToUsername(prior[0].email) || prior[0].name || "a user";
+      await recordChange(data.projectId, context.userId, `Removed ${username} from the project`);
+    }
     return { ok: true as const };
   });
 

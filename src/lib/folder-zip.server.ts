@@ -1,3 +1,4 @@
+import { recordAudit } from "@/lib/audit";
 import { assertFolderAccess } from "@/lib/projects-db";
 import { readFileBytes } from "@/lib/data-room";
 import { MAX_UPLOAD_BYTES } from "@/lib/file-limits";
@@ -99,6 +100,13 @@ export async function zipFolderForUser(
       data: stored.bytes,
     });
   }
+
+  await recordAudit({
+    projectId: access.project.id,
+    userId,
+    kind: "access",
+    summary: `Downloaded ${folder.name} (${files.length} ${files.length === 1 ? "file" : "files"})`,
+  });
 
   return {
     name: zipFileName(folder.name),

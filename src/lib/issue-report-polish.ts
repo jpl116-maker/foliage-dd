@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { recordAudit } from "@/lib/audit";
 import { assertProjectAccess } from "@/lib/projects-db";
 
 const issueSchema = z.object({
@@ -55,6 +56,12 @@ export const polishIssueReport = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     await assertProjectAccess(context.userId, data.projectId);
+    await recordAudit({
+      projectId: data.projectId,
+      userId: context.userId,
+      kind: "access",
+      summary: "Generated the issue report",
+    });
     const apiKey = process.env.XAI_API_KEY;
     if (!apiKey || data.issues.length === 0) return { ok: true as const, issues: [] as Polished[] };
 

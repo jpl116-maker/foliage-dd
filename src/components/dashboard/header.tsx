@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore, type FormEvent } from "react";
-import { FolderOpen, Home, LayoutGrid, Settings, Users } from "lucide-react";
+import { FolderOpen, Home, LayoutGrid, ScrollText, Settings, Users } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -122,6 +122,21 @@ export function Header() {
               <Link to="/p/$slug/users" params={{ slug: project.slug }}>
                 <Users className="size-4" />
                 Users
+              </Link>
+            </Button>
+          ) : null}
+          {can("manageUsers") ? (
+            <Button variant="ghost" size="sm" asChild>
+              <Link
+                to="/p/$slug/users"
+                params={{ slug: project.slug }}
+                hash="activity"
+                onClick={() => {
+                  window.dispatchEvent(new Event("foliage-activity"));
+                }}
+              >
+                <ScrollText className="size-4" />
+                Activity
               </Link>
             </Button>
           ) : null}

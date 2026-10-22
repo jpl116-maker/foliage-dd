@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { Search } from "lucide-react";
+import { createFileRoute, useRouterState } from "@tanstack/react-router";
+import { ChevronDown, Search } from "lucide-react";
 import { toast } from "sonner";
 import { RoleRoute, useRole } from "@/components/auth/role-provider";
 import { useProject } from "@/components/project/project-provider";
@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { listProjectAudit, type AuditKind, type AuditRow } from "@/lib/audit";
 import {
   addProjectMember,
   createProjectUser,
@@ -232,8 +233,140 @@ function ProjectUsersPanel() {
           </ul>
         )}
       </section>
+      <ActivityLog projectId={project.id} />
     </div>
   );
+}
+
+function ActivityLog({ projectId }: { projectId: string }) {
+  const hash = useRouterState({ select: (s) => s.location.hash });
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<"all" | AuditKind>("all");
+  const [rows, setRows] = useState<AuditRow[] | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (hash.replace(/^#/, "") === "activity") setOpen(true);
+  }, [hash]);
+
+  useEffect(() => {
+    function openFromHeader() {
+      setOpen(true);
+    }
+    window.addEventListener("foliage-activity", openFromHeader);
+    return () => window.removeEventListener("foliage-activity", openFromHeader);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.scrollIntoView({ block: "nearest" });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancel = false;
+    setRows(null);
+    void listProjectAudit({ data: { projectId, kind } })
+      .then((next) => {
+        if (!cancel) setRows(next);
+      })
+      .catch(() => {
+        if (!cancel) {
+          toast("Could not load activity");
+          setRows([]);
+        }
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [open, kind, projectId]);
+
+  return (
+    <section id="activity" ref={panelRef} className="mt-8">
+      <button
+        type="button"
+        onClick={() => setOpen((cur) => !cur)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-left shadow-[var(--shadow-border)] sm:px-5"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-medium uppercase tracking-wide text-muted">
+            Record
+          </span>
+          <span className="block text-sm text-ink">Activity</span>
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-faint transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <div className="mt-2 overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
+          <div className="flex gap-1 border-b border-border px-3 py-2 sm:px-4">
+            {(
+              [
+                ["all", "All"],
+                ["access", "Access"],
+                ["change", "Changes"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setKind(id)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs",
+                  kind === id ? "bg-paper-2 font-medium text-ink" : "text-muted hover:text-ink",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {rows === null ? (
+            <p className="px-4 py-6 text-sm text-muted sm:px-5">Loading activity…</p>
+          ) : rows.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-muted sm:px-5">No activity yet.</p>
+          ) : (
+            <ul>
+              {rows.map((row) => (
+                <li
+                  key={row.id}
+                  className="border-b border-border px-4 py-2 last:border-b-0 sm:px-5"
+                >
+                  <p className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted">
+                    <time className="font-mono tabular-nums" dateTime={row.at}>
+                      {whenLabel(row.at)}
+                    </time>
+                    <span className="font-medium text-ink">{row.username}</span>
+                  </p>
+                  <p className="text-sm text-ink">{row.summary}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {rows && rows.length === 200 ? (
+            <p className="border-t border-border px-4 py-2 text-xs text-muted sm:px-5">
+              Showing the latest 200 records.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function whenLabel(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function UsernameSearch({

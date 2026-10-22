@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { recordAudit } from "@/lib/audit";
 import { can } from "@/lib/roles";
 import { DEFAULT_PROJECT_ID, listScope } from "@/lib/projects";
 import { assertProjectAccess } from "@/lib/projects-db";
@@ -352,7 +353,14 @@ export const saveRequestList = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     await assertProjectAccess(context.userId, data.projectId);
-    await writeRequestList(data.projectId, data.workspace as WorkspaceId, {
+    const workspace = data.workspace as WorkspaceId;
+    const scope = listScope(data.projectId, workspace);
+    await ensureSchema();
+    const q = await sql();
+    const prior = await q<{ id: string; name: string; status: string }>`
+      select id, name, status from dd_requests where workspace = ${scope}
+    `;
+    await writeRequestList(data.projectId, workspace, {
       categories: data.categories.map((c) => ({
         id: c.id,
         name: c.name,
@@ -360,8 +368,50 @@ export const saveRequestList = createServerFn({ method: "POST" })
       })),
       requests: data.requests,
     });
+    const lines = requestChanges(prior, data.requests);
+    if (lines.length > 12) {
+      await recordAudit({
+        projectId: data.projectId,
+        userId: context.userId,
+        kind: "change",
+        summary: `Updated the request list (${lines.length} changes)`,
+      });
+    } else {
+      for (const summary of lines) {
+        await recordAudit({
+          projectId: data.projectId,
+          userId: context.userId,
+          kind: "change",
+          summary,
+        });
+      }
+    }
     return { ok: true as const };
   });
+
+function requestChanges(
+  before: { id: string; name: string; status: string }[],
+  after: { id: string; name: string; status: string }[],
+) {
+  const prev = new Map(before.map((item) => [item.id, item]));
+  const next = new Map(after.map((item) => [item.id, item]));
+  const lines: string[] = [];
+  for (const item of after) {
+    const old = prev.get(item.id);
+    if (!old) {
+      lines.push(`Added request "${item.name}"`);
+      continue;
+    }
+    const bits: string[] = [];
+    if (old.name !== item.name) bits.push(`renamed it to "${item.name}"`);
+    if (old.status !== item.status) bits.push(`set the status to ${item.status}`);
+    if (bits.length) lines.push(`Updated request "${old.name}": ${bits.join(", ")}`);
+  }
+  for (const item of before) {
+    if (!next.has(item.id)) lines.push(`Removed request "${item.name}"`);
+  }
+  return lines;
+}
 
 export const cloneRequestList = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
@@ -404,6 +454,12 @@ export const cloneRequestList = createServerFn({ method: "POST" })
       })),
     };
     await writeRequestList(data.projectId, workspace, list);
+    await recordAudit({
+      projectId: data.projectId,
+      userId: context.userId,
+      kind: "change",
+      summary: "Cloned the request list from another project",
+    });
     const { ensureListFolders } = await import("@/lib/data-room");
     await ensureListFolders(
       data.projectId,

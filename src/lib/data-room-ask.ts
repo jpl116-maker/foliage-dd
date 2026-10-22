@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { recordAudit } from "@/lib/audit";
 import { assertProjectAccess } from "@/lib/projects-db";
 import { can } from "@/lib/roles";
 import { roomRoot, type WorkspaceId } from "@/lib/workspace";
@@ -152,6 +153,12 @@ export const askDataRoom = createServerFn({ method: "POST" })
     }
     const files = await catalogFor(data.projectId, data.workspace);
     if (files.length === 0) {
+      await recordAudit({
+        projectId: data.projectId,
+        userId: context.userId,
+        kind: "access",
+        summary: "Asked the data room",
+      });
       return {
         ok: true as const,
         text: "This data room has no files yet.",
@@ -255,6 +262,18 @@ export const askDataRoom = createServerFn({ method: "POST" })
         folderName: file.folderName,
       });
     }
+
+    const readNames = readIds
+      .map((id) => byId.get(id)?.name)
+      .filter((name): name is string => Boolean(name));
+    await recordAudit({
+      projectId: data.projectId,
+      userId: context.userId,
+      kind: "access",
+      summary: readNames.length
+        ? `Asked the data room and read ${readNames.join(", ")}`
+        : "Asked the data room",
+    });
 
     return {
       ok: true as const,

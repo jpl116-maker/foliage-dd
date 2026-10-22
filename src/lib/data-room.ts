@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { recordAudit } from "@/lib/audit";
 import { ASSET_SEED } from "@/lib/seed-asset";
 import { SEED } from "@/lib/seed";
 import type { DdState } from "@/lib/types";
@@ -621,6 +622,12 @@ export const createFolder = createServerFn({ method: "POST" })
       insert into data_room_folders (id, parent_id, name, sort_order, project_id)
       values (${id}, ${parent.id}, ${data.name}, 1000, ${parent.projectId})
     `;
+    await recordAudit({
+      projectId: parent.projectId,
+      userId: context.userId,
+      kind: "change",
+      summary: `Created folder ${data.name}`,
+    });
     return { id };
   });
 
@@ -729,11 +736,12 @@ export const completeUpload = createServerFn({ method: "POST" })
     const q = await sql();
     const rows = await q<{
       id: string;
+      name: string;
       folder_id: string;
       size_bytes: number;
       storage_key: string | null;
     }>`
-      select id, folder_id, size_bytes, storage_key
+      select id, name, folder_id, size_bytes, storage_key
       from data_room_files
       where id = ${data.id}
     `;
@@ -749,6 +757,15 @@ export const completeUpload = createServerFn({ method: "POST" })
     await q`
       update data_room_files set ready = true where id = ${row.id}
     `;
+    const folder = await folderRow(row.folder_id);
+    if (folder) {
+      await recordAudit({
+        projectId: folder.projectId,
+        userId: context.userId,
+        kind: "change",
+        summary: `Uploaded ${row.name}`,
+      });
+    }
     return { id: row.id, folderId: row.folder_id };
   });
 
@@ -959,8 +976,8 @@ export const setFileReviewed = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureReviewedColumn();
     const q = await sql();
-    const rows = await q<{ id: string; folder_id: string }>`
-      select id, folder_id from data_room_files where id = ${data.id}
+    const rows = await q<{ id: string; name: string; folder_id: string }>`
+      select id, name, folder_id from data_room_files where id = ${data.id}
     `;
     const row = rows[0];
     if (!row) throw new Error("File not found");
@@ -994,6 +1011,14 @@ export const setFileReviewed = createServerFn({ method: "POST" })
       `;
       documentReviewed = (counts[0]?.n ?? 0) > 0;
     }
+    await recordAudit({
+      projectId: access.project.id,
+      userId: context.userId,
+      kind: "change",
+      summary: data.reviewed
+        ? `Marked ${row.name} reviewed`
+        : `Marked ${row.name} not reviewed`,
+    });
     return {
       ok: true as const,
       reviewed: data.reviewed,
@@ -1013,8 +1038,8 @@ export const setFileFlagged = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureReviewedColumn();
     const q = await sql();
-    const rows = await q<{ id: string; folder_id: string }>`
-      select id, folder_id from data_room_files where id = ${data.id}
+    const rows = await q<{ id: string; name: string; folder_id: string }>`
+      select id, name, folder_id from data_room_files where id = ${data.id}
     `;
     const row = rows[0];
     if (!row) throw new Error("File not found");
@@ -1025,6 +1050,12 @@ export const setFileFlagged = createServerFn({ method: "POST" })
     await q`
       update data_room_files set flagged = ${data.flagged} where id = ${data.id}
     `;
+    await recordAudit({
+      projectId: access.project.id,
+      userId: context.userId,
+      kind: "change",
+      summary: data.flagged ? `Flagged ${row.name}` : `Cleared the flag on ${row.name}`,
+    });
     return { ok: true as const, flagged: data.flagged };
   });
 
@@ -1041,16 +1072,19 @@ export const assignRoomItem = createServerFn({ method: "POST" })
     await ensureReviewedColumn();
     const q = await sql();
     let folderId: string;
+    let itemName = "an item";
     if (data.kind === "file") {
-      const rows = await q<{ id: string; folder_id: string }>`
-        select id, folder_id from data_room_files where id = ${data.id}
+      const rows = await q<{ id: string; name: string; folder_id: string }>`
+        select id, name, folder_id from data_room_files where id = ${data.id}
       `;
       if (!rows[0]) throw new Error("File not found");
       folderId = rows[0].folder_id;
+      itemName = rows[0].name;
     } else {
       const folder = await folderRow(data.id);
       if (!folder) throw new Error("Folder not found");
       folderId = folder.id;
+      itemName = folder.name;
     }
     const access = await assertFolderAccess(context.userId, folderId);
     if (!can(access.role, "assignFiles")) {
@@ -1093,6 +1127,14 @@ export const assignRoomItem = createServerFn({ method: "POST" })
         }
       }
     }
+    await recordAudit({
+      projectId: access.project.id,
+      userId: context.userId,
+      kind: "change",
+      summary: username
+        ? `Assigned ${itemName || "an item"} to ${username}`
+        : `Cleared the assignment on ${itemName || "an item"}`,
+    });
     return {
       ok: true as const,
       assignedUserId: assigned,
@@ -1107,8 +1149,8 @@ export const removeFile = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string() }))
   .handler(async ({ context, data }) => {
     const q = await sql();
-    const rows = await q<{ id: string; storage_key: string | null; folder_id: string }>`
-      select id, storage_key, folder_id from data_room_files where id = ${data.id}
+    const rows = await q<{ id: string; name: string; storage_key: string | null; folder_id: string }>`
+      select id, name, storage_key, folder_id from data_room_files where id = ${data.id}
     `;
     if (!rows[0]) throw new Error("File not found");
     const access = await assertFolderAccess(context.userId, rows[0].folder_id);
@@ -1120,6 +1162,12 @@ export const removeFile = createServerFn({ method: "POST" })
       await deleteBlob(rows[0].storage_key);
     }
     await q`delete from data_room_files where id = ${data.id}`;
+    await recordAudit({
+      projectId: access.project.id,
+      userId: context.userId,
+      kind: "change",
+      summary: `Deleted ${rows[0].name}`,
+    });
     return { ok: true as const, fileIds: [data.id] };
   });
 
@@ -1156,6 +1204,12 @@ export const removeFolder = createServerFn({ method: "POST" })
       if (file.storage_key) await deleteBlob(file.storage_key);
     }
     await q`delete from data_room_folders where id = ${folder.id}`;
+    await recordAudit({
+      projectId: folder.projectId,
+      userId: context.userId,
+      kind: "change",
+      summary: `Deleted folder ${folder.name} (${fileIds.length} ${fileIds.length === 1 ? "file" : "files"})`,
+    });
     return { ok: true as const, fileIds, folderIds: [...ids] };
   });
 
@@ -1366,6 +1420,12 @@ export const moveFile = createServerFn({ method: "POST" })
     await q`
       update data_room_files set folder_id = ${dest.id} where id = ${file.id}
     `;
+    await recordAudit({
+      projectId: source.projectId,
+      userId: context.userId,
+      kind: "change",
+      summary: `Moved ${file.name} to ${dest.name}`,
+    });
     return { ok: true as const };
   });
 
@@ -1416,5 +1476,11 @@ export const moveFolder = createServerFn({ method: "POST" })
     await q`
       update data_room_folders set parent_id = ${dest.id} where id = ${folder.id}
     `;
+    await recordAudit({
+      projectId: folder.projectId,
+      userId: context.userId,
+      kind: "change",
+      summary: `Moved folder ${folder.name} to ${dest.name}`,
+    });
     return { ok: true as const };
   });

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { recordAudit } from "@/lib/audit";
 import { DEFAULT_PROJECT_ID, listScope } from "@/lib/projects";
 import { assertProjectAccess, assertProjectCan } from "@/lib/projects-db";
 import { ASSET_SEED } from "@/lib/seed-asset";
@@ -169,6 +170,29 @@ async function readIssues(projectId: string, workspace: WorkspaceId): Promise<Is
   return rows.map(mapIssue);
 }
 
+function issueChanges(before: Issue[], after: Issue[]) {
+  const prev = new Map(before.map((issue) => [issue.id, issue]));
+  const next = new Map(after.map((issue) => [issue.id, issue]));
+  const lines: string[] = [];
+  for (const issue of after) {
+    const old = prev.get(issue.id);
+    if (!old) {
+      lines.push(`Added issue "${issue.title}"`);
+      continue;
+    }
+    const bits: string[] = [];
+    if (old.title !== issue.title) bits.push(`renamed it to "${issue.title}"`);
+    if (old.summary !== issue.summary) bits.push("edited the note");
+    if (old.status !== issue.status) bits.push(`set the status to ${issue.status}`);
+    if (old.severity !== issue.severity) bits.push(`set the severity to ${issue.severity}`);
+    if (bits.length) lines.push(`Updated "${old.title}": ${bits.join(", ")}`);
+  }
+  for (const issue of before) {
+    if (!next.has(issue.id)) lines.push(`Removed issue "${issue.title}"`);
+  }
+  return lines;
+}
+
 export const loadIssues = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator(
@@ -206,6 +230,26 @@ export const saveIssues = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     await assertProjectCan(context.userId, data.projectId, "raiseIssues");
-    await writeIssues(data.projectId, data.workspace as WorkspaceId, data.issues);
+    const workspace = data.workspace as WorkspaceId;
+    const before = await readIssues(data.projectId, workspace);
+    await writeIssues(data.projectId, workspace, data.issues);
+    const lines = issueChanges(before, data.issues);
+    if (lines.length > 12) {
+      await recordAudit({
+        projectId: data.projectId,
+        userId: context.userId,
+        kind: "change",
+        summary: `Updated the issues list (${lines.length} changes)`,
+      });
+    } else {
+      for (const summary of lines) {
+        await recordAudit({
+          projectId: data.projectId,
+          userId: context.userId,
+          kind: "change",
+          summary,
+        });
+      }
+    }
     return { ok: true as const };
   });
