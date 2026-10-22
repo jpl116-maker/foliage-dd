@@ -223,8 +223,126 @@ export function issueReportDocx(lines: string[]) {
   ]);
 }
 
-export function downloadIssueReport(filename: string, lines: string[]) {
-  const blob = issueReportDocx(lines);
+export type ReportFormat = "docx" | "pdf";
+
+function pdfEscape(text: string) {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 63;
+    let byte = code;
+    if (code === 0x2013 || code === 0x2014) {
+      out += "--";
+      continue;
+    }
+    if (code === 0x2018 || code === 0x2019) byte = 0x27;
+    else if (code === 0x201c || code === 0x201d) byte = 0x22;
+    else if (code >= 32 && code <= 126) byte = code;
+    else if (code >= 160 && code <= 255) byte = code;
+    else byte = 63;
+    if (byte === 0x5c || byte === 0x28 || byte === 0x29) out += `\\${String.fromCharCode(byte)}`;
+    else if (byte > 126) out += `\\${byte.toString(8).padStart(3, "0")}`;
+    else out += String.fromCharCode(byte);
+  }
+  return out;
+}
+
+function wrapReportLine(text: string, width: number) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    if (!line) {
+      line = word;
+      continue;
+    }
+    if (`${line} ${word}`.length <= width) line = `${line} ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+function pdfBytes(objects: string[]) {
+  const encoder = new TextEncoder();
+  const chunks: Uint8Array[] = [encoder.encode("%PDF-1.4\n")];
+  const offsets = [0];
+  for (let i = 1; i < objects.length; i++) {
+    offsets[i] = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    chunks.push(encoder.encode(`${i} 0 obj\n${objects[i]}\nendobj\n`));
+  }
+  const startxref = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  let xref = `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for (let i = 1; i < objects.length; i++) {
+    xref += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  chunks.push(
+    encoder.encode(
+      `${xref}trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`,
+    ),
+  );
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
+export function issueReportPdf(lines: string[]) {
+  const wrapped: { text: string; heading: boolean }[] = [];
+  lines.forEach((line, index) => {
+    const heading = index === 0 || /^\d+\. /.test(line);
+    for (const row of wrapReportLine(line, heading ? 72 : 92)) {
+      wrapped.push({ text: row, heading });
+    }
+  });
+  const pageSize = 40;
+  const pages: { text: string; heading: boolean }[][] = [];
+  for (let i = 0; i < wrapped.length; i += pageSize) pages.push(wrapped.slice(i, i + pageSize));
+  if (pages.length === 0) pages.push([]);
+
+  const objects = ["", "", "", "", ""];
+  const firstPage = 5;
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[2] = `<< /Type /Pages /Kids [${pages
+    .map((_, index) => `${firstPage + index * 2} 0 R`)
+    .join(" ")}] /Count ${pages.length} >>`;
+  objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+  objects[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
+  pages.forEach((rows, index) => {
+    const pageObj = firstPage + index * 2;
+    const contentObj = pageObj + 1;
+    let stream = "BT\n";
+    let font = "";
+    let y = 740;
+    for (const row of rows) {
+      const next = row.heading ? "F2" : "F1";
+      const size = row.heading ? 13 : 11;
+      if (next !== font) {
+        stream += `/${next} ${size} Tf\n`;
+        font = next;
+      }
+      stream += `1 0 0 1 72 ${y} Tm (${pdfEscape(row.text)}) Tj\n`;
+      y -= 16;
+    }
+    stream += "ET";
+    objects[contentObj] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+    objects[pageObj] =
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObj} 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>`;
+  });
+
+  const bytes = pdfBytes(objects);
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return new Blob([copy], { type: "application/pdf" });
+}
+
+export function downloadIssueReport(filename: string, lines: string[], format: ReportFormat) {
+  const blob = format === "pdf" ? issueReportPdf(lines) : issueReportDocx(lines);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

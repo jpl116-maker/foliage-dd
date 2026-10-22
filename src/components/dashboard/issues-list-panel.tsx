@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { IssueDeleteButton } from "@/components/dashboard/issue-delete-button";
 import { RaiseIssueDialog } from "@/components/dashboard/raise-issue-dialog";
 import { issueFileRef } from "@/lib/issue-file";
-import { downloadIssueReport, reportIssues, reportParagraphs } from "@/lib/issue-report";
+import { downloadIssueReport, reportIssues, reportParagraphs, type ReportFormat } from "@/lib/issue-report";
 import { useDdStore, type IssueFilter } from "@/lib/store";
 import {
   ISSUE_STATUS_LABEL,
@@ -54,6 +54,7 @@ export function IssuesListPanel() {
   const [filter, setFilter] = useState<IssueFilter>("all");
   const [raiseOpen, setRaiseOpen] = useState(false);
   const [editing, setEditing] = useState<Issue | null>(null);
+  const [reportFormat, setReportFormat] = useState<ReportFormat>("docx");
 
   useEffect(() => {
     setFilter("all");
@@ -93,6 +94,20 @@ export function IssuesListPanel() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <div className="flex h-11 shrink-0 items-center gap-2 rounded-md bg-surface px-2.5 text-sm shadow-[var(--shadow-border)]">
+            <label htmlFor="report-format" className="text-xs font-medium whitespace-nowrap text-muted">
+              Format
+            </label>
+            <select
+              id="report-format"
+              value={reportFormat}
+              onChange={(e) => setReportFormat(e.target.value as ReportFormat)}
+              className="h-9 bg-transparent text-sm text-ink outline-none"
+            >
+              <option value="docx">Word</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
           <Button
             type="button"
             variant="outline"
@@ -116,7 +131,8 @@ export function IssuesListPanel() {
                   projectId,
                 }),
               });
-              downloadIssueReport(`${slug}-issues-report.docx`, lines);
+              const extension = reportFormat === "pdf" ? "pdf" : "docx";
+              downloadIssueReport(`${slug}-issues-report.${extension}`, lines, reportFormat);
               toast("Issue report downloaded");
             }}
           >
