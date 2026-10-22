@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { FileDown, Plus } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
+import { Check, ChevronDown, FileDown, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { IssueDeleteButton } from "@/components/dashboard/issue-delete-button";
 import { RaiseIssueDialog } from "@/components/dashboard/raise-issue-dialog";
 import { issueFileRef } from "@/lib/issue-file";
-import { downloadIssueReport, reportIssues, reportParagraphs, type ReportFormat } from "@/lib/issue-report";
+import {
+  buildIssueReport,
+  downloadIssueReport,
+  reportIssues,
+  type ReportFormat,
+} from "@/lib/issue-report";
 import { useDdStore, type IssueFilter } from "@/lib/store";
 import {
   ISSUE_STATUS_LABEL,
@@ -55,6 +61,30 @@ export function IssuesListPanel() {
   const [raiseOpen, setRaiseOpen] = useState(false);
   const [editing, setEditing] = useState<Issue | null>(null);
   const [reportFormat, setReportFormat] = useState<ReportFormat>("docx");
+  const [formatOpen, setFormatOpen] = useState(false);
+
+  function downloadReport() {
+    const preparedOn = new Date().toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+    const report = buildIssueReport({
+      matter,
+      workspace,
+      preparedOn,
+      issues: reportIssues({
+        issues,
+        documents,
+        categories,
+        workspace,
+        projectId,
+      }),
+    });
+    const extension = reportFormat === "pdf" ? "pdf" : "docx";
+    downloadIssueReport(`${slug}-issues-report.${extension}`, report, reportFormat);
+    toast("Issue report downloaded");
+  }
 
   useEffect(() => {
     setFilter("all");
@@ -94,51 +124,55 @@ export function IssuesListPanel() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <div className="flex h-11 shrink-0 items-center gap-2 rounded-md bg-surface px-2.5 text-sm shadow-[var(--shadow-border)]">
-            <label htmlFor="report-format" className="text-xs font-medium whitespace-nowrap text-muted">
-              Format
-            </label>
-            <select
-              id="report-format"
-              value={reportFormat}
-              onChange={(e) => setReportFormat(e.target.value as ReportFormat)}
-              className="h-9 bg-transparent text-sm text-ink outline-none"
+          <div className="inline-flex h-9 shrink-0 overflow-hidden rounded-md shadow-[var(--shadow-border)]">
+            <button
+              type="button"
+              onClick={downloadReport}
+              className="inline-flex items-center gap-2 px-3 text-sm font-medium text-ink hover:bg-paper-2"
             >
-              <option value="docx">Word</option>
-              <option value="pdf">PDF</option>
-            </select>
+              <FileDown className="size-4" />
+              Report
+              <span className="text-muted">{reportFormat === "pdf" ? "PDF" : "Word"}</span>
+            </button>
+            <Popover.Root open={formatOpen} onOpenChange={setFormatOpen}>
+              <Popover.Trigger asChild>
+                <button
+                  type="button"
+                  aria-label="Report format"
+                  className="inline-flex w-8 items-center justify-center border-l border-border text-ink hover:bg-paper-2"
+                >
+                  <ChevronDown className="size-4" />
+                </button>
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content
+                  align="end"
+                  sideOffset={6}
+                  className="z-50 w-36 rounded-md bg-surface p-1 text-ink shadow-[var(--shadow-border)]"
+                >
+                  {(
+                    [
+                      ["docx", "Word"],
+                      ["pdf", "PDF"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className="flex h-11 w-full items-center justify-between px-3 text-left text-sm hover:bg-paper-2"
+                      onClick={() => {
+                        setReportFormat(value);
+                        setFormatOpen(false);
+                      }}
+                    >
+                      {label}
+                      {reportFormat === value ? <Check className="size-4 text-forest" /> : null}
+                    </button>
+                  ))}
+                </Popover.Content>
+              </Popover.Portal>
+            </Popover.Root>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={() => {
-              const preparedOn = new Date().toLocaleDateString("en-US", {
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              });
-              const lines = reportParagraphs({
-                matter,
-                workspace,
-                preparedOn,
-                issues: reportIssues({
-                  issues,
-                  documents,
-                  categories,
-                  workspace,
-                  projectId,
-                }),
-              });
-              const extension = reportFormat === "pdf" ? "pdf" : "docx";
-              downloadIssueReport(`${slug}-issues-report.${extension}`, lines, reportFormat);
-              toast("Issue report downloaded");
-            }}
-          >
-            <FileDown className="size-4" />
-            Report
-          </Button>
           {canRaise ? (
           <Button
             size="sm"

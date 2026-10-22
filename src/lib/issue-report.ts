@@ -103,12 +103,23 @@ export function reportIssues(input: {
     });
 }
 
-export function reportParagraphs(input: {
+export type IssueReport = {
+  title: string;
+  project: string;
+  client: string;
+  preparedOn: string;
+  intro: string;
+  facts: { label: string; value: string }[];
+  summary: string;
+  issues: ReportIssue[];
+};
+
+export function buildIssueReport(input: {
   matter: Matter;
   workspace: WorkspaceId;
   issues: ReportIssue[];
   preparedOn: string;
-}): string[] {
+}): IssueReport {
   const { matter, issues } = input;
   const workstream = WORKSPACE_LABEL[input.workspace];
   const open = issues.filter((issue) => issue.status === "Open").length;
@@ -116,25 +127,24 @@ export function reportParagraphs(input: {
   const closed = issues.filter((issue) => issue.status === "Resolved").length;
   const critical = issues.filter((issue) => issue.severity === "Critical").length;
   const high = issues.filter((issue) => issue.severity === "High").length;
-  const lines = [
-    "Tax due diligence issue report",
-    matter.name,
-    `Prepared ${input.preparedOn}`,
-    `This report summarizes the tax due diligence issues recorded for ${matter.name}. The client is ${matter.client}. The target ${input.workspace === "asset" ? "portfolio" : "entity"} is ${matter.target}. The transaction is ${matter.dealType}. The comments cover the ${workstream} workstream and are taken from the issues list as of ${input.preparedOn}.`,
-    issues.length === 0
-      ? "No issues are recorded on the issues list."
-      : `The issues list contains ${issues.length} ${issues.length === 1 ? "issue" : "issues"}: ${open} open, ${watch} on watch, and ${closed} closed. ${critical} ${critical === 1 ? "is" : "are"} critical and ${high} ${high === 1 ? "is" : "are"} high.`,
-  ];
-  issues.forEach((issue, index) => {
-    lines.push(`${index + 1}. ${issue.title}`);
-    lines.push(
-      `Status: ${issue.status}. Severity: ${issue.severity}.${issue.code ? ` Code: ${issue.code}.` : ""}`,
-    );
-    lines.push(`Why this is an issue. ${issue.why}`);
-    lines.push(`Where it was found. ${issue.where}`);
-    if (issue.finding) lines.push(`Finding. ${issue.finding}`);
-  });
-  return lines;
+  return {
+    title: "Tax Due Diligence Issue Report",
+    project: matter.name,
+    client: matter.client,
+    preparedOn: input.preparedOn,
+    intro: `This report summarizes the tax due diligence issues recorded for ${matter.name}. It covers the ${workstream} workstream and is taken from the issues list as of ${input.preparedOn}.`,
+    facts: [
+      { label: "Client", value: matter.client },
+      { label: "Target", value: matter.target },
+      { label: "Transaction", value: matter.dealType },
+      { label: "Workstream", value: workstream },
+    ],
+    summary:
+      issues.length === 0
+        ? "No issues are recorded on the issues list."
+        : `${issues.length} ${issues.length === 1 ? "issue" : "issues"}: ${open} open, ${watch} on watch, and ${closed} closed. ${critical} ${critical === 1 ? "is" : "are"} critical and ${high} ${high === 1 ? "is" : "are"} high.`,
+    issues,
+  };
 }
 
 function crc32(data: Uint8Array) {
@@ -195,31 +205,158 @@ function zipStore(files: { name: string; data: Uint8Array }[]) {
   });
 }
 
-function paragraph(text: string, heading: boolean) {
-  const size = heading ? "28" : "22";
-  const bold = heading ? "<w:b/>" : "";
-  const before = heading ? "280" : "80";
-  return `<w:p><w:pPr><w:spacing w:before="${before}" w:after="60"/></w:pPr><w:r><w:rPr>${bold}<w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr><w:t xml:space="preserve">${text
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")}</w:t></w:r></w:p>`;
+const NAVY = "1E3A8A";
+const BLUE = "4169E1";
+const INK = "1F2937";
+const MUTED = "6B7280";
+const RULE = "D6DCE8";
+const WASH = "EEF2FF";
+
+function xml(text: string) {
+  return text.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">");
 }
 
-export function issueReportDocx(lines: string[]) {
-  const body = lines
-    .map((line, index) => paragraph(line, index === 0 || /^\d+\. /.test(line)))
-    .join("");
+function wordRun(
+  text: string,
+  opts: { bold?: boolean; italic?: boolean; size?: number; color?: string } = {},
+) {
+  const size = opts.size ?? 22;
+  return `<w:r><w:rPr>${opts.bold ? "<w:b/>" : ""}${opts.italic ? "<w:i/>" : ""}<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/>${opts.color ? `<w:color w:val="${opts.color}"/>` : ""}</w:rPr><w:t xml:space="preserve">${xml(text)}</w:t></w:r>`;
+}
+
+function wordPara(
+  content: string,
+  opts: { before?: number; after?: number; border?: "bottom" | "top"; rightTab?: boolean } = {},
+) {
+  const border =
+    opts.border === "bottom"
+      ? `<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="${BLUE}"/></w:pBdr>`
+      : opts.border === "top"
+        ? `<w:pBdr><w:top w:val="single" w:sz="8" w:space="1" w:color="${BLUE}"/></w:pBdr>`
+        : "";
+  const tab = opts.rightTab ? `<w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs>` : "";
+  return `<w:p><w:pPr><w:spacing w:before="${opts.before ?? 0}" w:after="${opts.after ?? 60}" w:line="276" w:lineRule="auto"/>${tab}${border}</w:pPr>${content}</w:p>`;
+}
+
+function wordCell(blocks: string, width: number, fill?: string) {
+  const shade = fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>` : "";
+  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${shade}<w:vAlign w:val="center"/><w:tcMar><w:top w:w="70" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="70" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tcMar></w:tcPr>${blocks}</w:tc>`;
+}
+
+function wordTable(rows: string[]) {
+  const edge = (name: string) =>
+    `<w:${name} w:val="single" w:sz="4" w:space="0" w:color="${RULE}"/>`;
+  return `<w:tbl><w:tblPr><w:tblW w:w="9360" w:type="dxa"/><w:tblBorders>${edge("top")}${edge("left")}${edge("bottom")}${edge("right")}${edge("insideH")}${edge("insideV")}</w:tblBorders></w:tblPr>${rows
+    .map((row) => `<w:tr>${row}</w:tr>`)
+    .join("")}</w:tbl>`;
+}
+
+function labeledBlock(label: string, text: string) {
+  if (!text.trim()) return "";
+  return (
+    wordPara(wordRun(label, { bold: true, size: 18, color: BLUE }), { before: 160, after: 20 }) +
+    wordPara(wordRun(text, { size: 22, color: INK }), { before: 0, after: 40 })
+  );
+}
+
+export function issueReportDocx(report: IssueReport) {
+  const fact = (item: { label: string; value: string }) =>
+    wordCell(
+      wordPara(wordRun(item.label.toUpperCase(), { bold: true, size: 16, color: BLUE }), {
+        before: 0,
+        after: 0,
+      }) +
+        wordPara(wordRun(item.value || "None", { bold: true, size: 22, color: INK }), {
+          before: 20,
+          after: 0,
+        }),
+      4680,
+    );
+  const head = (label: string) =>
+    wordCell(
+      wordPara(wordRun(label, { bold: true, size: 16, color: "FFFFFF" }), { before: 0, after: 0 }),
+      3120,
+      BLUE,
+    );
+  const value = (text: string) =>
+    wordCell(
+      wordPara(wordRun(text || "None", { size: 20, color: INK }), { before: 0, after: 0 }),
+      3120,
+    );
+  const body = [
+    wordPara(wordRun(report.title, { bold: true, size: 36, color: NAVY }), { before: 0, after: 40 }),
+    wordPara(wordRun(report.project, { size: 26, color: INK }), { before: 0, after: 0 }),
+    wordPara(wordRun(`Prepared ${report.preparedOn}`, { italic: true, size: 18, color: MUTED }), {
+      before: 40,
+      after: 160,
+      border: "bottom",
+    }),
+    wordPara(wordRun(report.intro, { size: 22, color: INK }), { before: 200, after: 160 }),
+    wordTable([
+      fact(report.facts[0]) + fact(report.facts[1]),
+      fact(report.facts[2]) + fact(report.facts[3]),
+    ]),
+    wordPara("", { before: 80, after: 40 }),
+    wordTable([
+      wordCell(
+        wordPara(wordRun(report.summary, { size: 22, color: INK }), { before: 20, after: 20 }),
+        9360,
+        WASH,
+      ),
+    ]),
+    wordPara(wordRun("Issues", { bold: true, size: 28, color: NAVY }), {
+      before: 320,
+      after: 80,
+      border: "bottom",
+    }),
+    ...report.issues.flatMap((issue, index) => [
+      wordPara(wordRun(`ISSUE ${index + 1}`, { bold: true, size: 16, color: BLUE }), {
+        before: 280,
+        after: 0,
+      }),
+      wordPara(wordRun(issue.title, { bold: true, size: 26, color: NAVY }), { before: 40, after: 80 }),
+      wordTable([
+        head("STATUS") + head("SEVERITY") + head("CODE"),
+        value(issue.status) + value(issue.severity) + value(issue.code),
+      ]),
+      labeledBlock("WHY THIS IS AN ISSUE", issue.why),
+      labeledBlock("WHERE IT WAS FOUND", issue.where),
+      labeledBlock("FINDING", issue.finding),
+    ]),
+  ].join("");
+  const header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${wordPara(
+    wordRun("TAX DUE DILIGENCE", { bold: true, size: 16, color: BLUE }) +
+      "<w:r><w:tab/></w:r>" +
+      wordRun(report.project, { size: 16, color: MUTED }),
+    { before: 0, after: 40, border: "bottom", rightTab: true },
+  )}</w:hdr>`;
+  const footer = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${wordPara(
+    wordRun("Confidential", { size: 16, color: MUTED }) +
+      "<w:r><w:tab/></w:r>" +
+      wordRun("Page ", { size: 16, color: MUTED }) +
+      `<w:r><w:rPr><w:sz w:val="16"/><w:szCs w:val="16"/><w:color w:val="${MUTED}"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>` +
+      wordRun(" of ", { size: 16, color: MUTED }) +
+      `<w:r><w:rPr><w:sz w:val="16"/><w:szCs w:val="16"/><w:color w:val="${MUTED}"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> NUMPAGES </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>`,
+    { before: 0, after: 0, border: "top", rightTab: true },
+  )}</w:ftr>`;
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080"/></w:sectPr></w:body></w:document>`;
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body}<w:sectPr><w:headerReference w:type="default" r:id="rId2"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1134" w:right="1080" w:bottom="1134" w:left="1080" w:header="567" w:footer="567"/></w:sectPr></w:body></w:document>`;
   const types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>`;
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer.xml"/></Relationships>`;
   const encoder = new TextEncoder();
   return zipStore([
     { name: "[Content_Types].xml", data: encoder.encode(types) },
     { name: "_rels/.rels", data: encoder.encode(rels) },
     { name: "word/document.xml", data: encoder.encode(document) },
+    { name: "word/header.xml", data: encoder.encode(header) },
+    { name: "word/footer.xml", data: encoder.encode(footer) },
+    { name: "word/_rels/document.xml.rels", data: encoder.encode(docRels) },
   ]);
 }
 
@@ -265,6 +402,208 @@ function wrapReportLine(text: string, width: number) {
   return lines.length ? lines : [""];
 }
 
+const PDF_BLUE = "0.255 0.412 0.882";
+const PDF_NAVY = "0.118 0.227 0.541";
+const PDF_INK = "0.122 0.161 0.216";
+const PDF_MUTED = "0.420 0.447 0.502";
+const PDF_WASH = "0.933 0.949 1";
+const PDF_LINE = "0.839 0.863 0.910";
+const PDF_LEFT = 54;
+const PDF_RIGHT = 558;
+const PDF_WIDTH = PDF_RIGHT - PDF_LEFT;
+
+type PdfItem = {
+  h: number;
+  keepWithNext?: boolean;
+  draw: (yTop: number) => string;
+};
+
+function pdfTextWidth(text: string, size: number) {
+  return text.length * size * 0.5;
+}
+
+function pdfLines(text: string, size: number, width = PDF_WIDTH) {
+  const max = Math.max(24, Math.floor(width / (size * 0.5)));
+  return wrapReportLine(text, max);
+}
+
+function pdfText(
+  text: string,
+  size: number,
+  color: string,
+  bold: boolean,
+  opts: { before?: number; after?: number; width?: number; x?: number } = {},
+): PdfItem {
+  const lines = pdfLines(text, size, opts.width ?? PDF_WIDTH);
+  const leading = size + 4;
+  const before = opts.before ?? 0;
+  const after = opts.after ?? 2;
+  const x = opts.x ?? PDF_LEFT;
+  return {
+    h: before + lines.length * leading + after,
+    draw(yTop) {
+      let y = yTop - before - size;
+      let stream = `BT /${bold ? "F2" : "F1"} ${size} Tf ${color} rg\n`;
+      for (const line of lines) {
+        stream += `1 0 0 1 ${x} ${y.toFixed(1)} Tm (${pdfEscape(line)}) Tj\n`;
+        y -= leading;
+      }
+      return `${stream}ET\n`;
+    },
+  };
+}
+
+function pdfRule(): PdfItem {
+  return {
+    h: 14,
+    draw(yTop) {
+      const y = (yTop - 7).toFixed(1);
+      return `${PDF_BLUE} RG 1.25 w ${PDF_LEFT} ${y} m ${PDF_RIGHT} ${y} l S\n`;
+    },
+  };
+}
+
+function pdfCallout(text: string): PdfItem {
+  const lines = pdfLines(text, 11, PDF_WIDTH - 20);
+  const leading = 15;
+  const inner = 16 + lines.length * leading;
+  return {
+    h: inner + 8,
+    draw(yTop) {
+      const top = yTop - 4;
+      const boxH = inner - 8;
+      let stream = `${PDF_WASH} rg ${PDF_LEFT} ${(top - boxH).toFixed(1)} ${PDF_WIDTH} ${boxH} re f\n`;
+      stream += `BT /F1 11 Tf ${PDF_INK} rg\n`;
+      let y = top - 16;
+      for (const line of lines) {
+        stream += `1 0 0 1 ${PDF_LEFT + 10} ${y.toFixed(1)} Tm (${pdfEscape(line)}) Tj\n`;
+        y -= leading;
+      }
+      return `${stream}ET\n`;
+    },
+  };
+}
+
+function pdfFacts(facts: { label: string; value: string }[]): PdfItem {
+  const h = 78;
+  return {
+    h: h + 8,
+    draw(yTop) {
+      const top = yTop - 4;
+      const boxH = h - 8;
+      let stream = `${PDF_WASH} rg ${PDF_LEFT} ${(top - boxH).toFixed(1)} ${PDF_WIDTH} ${boxH} re f\n`;
+      stream += `${PDF_LINE} RG 0.6 w ${PDF_LEFT} ${(top - boxH).toFixed(1)} ${PDF_WIDTH} ${boxH} re S\n`;
+      facts.slice(0, 4).forEach((fact, index) => {
+        const col = index % 2;
+        const row = Math.floor(index / 2);
+        const x = PDF_LEFT + 12 + col * (PDF_WIDTH / 2);
+        const labelY = top - 16 - row * 34;
+        const valueY = labelY - 13;
+        stream += `BT /F2 8 Tf ${PDF_BLUE} rg 1 0 0 1 ${x} ${labelY.toFixed(1)} Tm (${pdfEscape(fact.label.toUpperCase())}) Tj ET\n`;
+        const value = pdfLines(fact.value || "None", 11, PDF_WIDTH / 2 - 24)[0];
+        stream += `BT /F2 11 Tf ${PDF_INK} rg 1 0 0 1 ${x} ${valueY.toFixed(1)} Tm (${pdfEscape(value)}) Tj ET\n`;
+      });
+      return stream;
+    },
+  };
+}
+
+function pdfMeta(issue: ReportIssue): PdfItem {
+  const cells = [
+    ["STATUS", issue.status],
+    ["SEVERITY", issue.severity],
+    ["CODE", issue.code || "None"],
+  ];
+  const colW = PDF_WIDTH / 3;
+  return {
+    h: 36,
+    draw(yTop) {
+      const top = yTop - 2;
+      const boxH = 32;
+      let stream = "";
+      cells.forEach((cell, index) => {
+        const x = PDF_LEFT + index * colW;
+        stream += `${PDF_NAVY} rg ${x} ${(top - boxH).toFixed(1)} ${colW - 4} 14 re f\n`;
+        stream += `BT /F2 8 Tf 1 1 1 rg 1 0 0 1 ${x + 6} ${(top - 11).toFixed(1)} Tm (${pdfEscape(cell[0])}) Tj ET\n`;
+        const value = pdfLines(cell[1], 10, colW - 16)[0];
+        stream += `BT /F1 10 Tf ${PDF_INK} rg 1 0 0 1 ${x + 6} ${(top - 26).toFixed(1)} Tm (${pdfEscape(value)}) Tj ET\n`;
+      });
+      return stream;
+    },
+  };
+}
+
+function pdfItems(report: IssueReport): PdfItem[] {
+  const items: PdfItem[] = [
+    pdfText(report.title, 18, PDF_NAVY, true, { before: 0, after: 4 }),
+    pdfText(report.project, 13, PDF_INK, false, { before: 2, after: 2 }),
+    pdfText(`Prepared ${report.preparedOn}`, 9, PDF_MUTED, false, { before: 2, after: 2 }),
+    pdfRule(),
+    pdfText(report.intro, 11, PDF_INK, false, { before: 8, after: 8 }),
+    pdfFacts(report.facts),
+    pdfCallout(report.summary),
+    pdfText("Issues", 14, PDF_NAVY, true, { before: 16, after: 4 }),
+    pdfRule(),
+  ];
+  report.issues.forEach((issue, index) => {
+    const kicker = pdfText(`ISSUE ${index + 1}`, 8, PDF_BLUE, true, { before: 14, after: 1 });
+    kicker.keepWithNext = true;
+    const title = pdfText(issue.title, 13, PDF_NAVY, true, { before: 2, after: 6 });
+    title.keepWithNext = true;
+    items.push(kicker, title, pdfMeta(issue));
+    for (const [label, text] of [
+      ["WHY THIS IS AN ISSUE", issue.why],
+      ["WHERE IT WAS FOUND", issue.where],
+      ["FINDING", issue.finding],
+    ] as const) {
+      if (!text.trim()) continue;
+      const heading = pdfText(label, 9, PDF_BLUE, true, { before: 8, after: 1 });
+      heading.keepWithNext = true;
+      items.push(heading, pdfText(text, 11, PDF_INK, false, { before: 1, after: 2 }));
+    }
+  });
+  return items;
+}
+
+function paginate(items: PdfItem[]) {
+  const room = 700 - 72;
+  const pages: PdfItem[][] = [];
+  let current: PdfItem[] = [];
+  let used = 0;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const partner = item.keepWithNext ? items[i + 1] : undefined;
+    const need = item.h + (partner ? partner.h : 0);
+    if (current.length && used + need > room) {
+      pages.push(current);
+      current = [];
+      used = 0;
+    }
+    current.push(item);
+    used += item.h;
+  }
+  if (current.length) pages.push(current);
+  return pages.length ? pages : [[]];
+}
+
+function paintPage(items: PdfItem[], pageNo: number, pageCount: number, report: IssueReport) {
+  const projectX = Math.max(PDF_LEFT + 140, PDF_RIGHT - pdfTextWidth(report.project, 8));
+  let stream = `${PDF_BLUE} RG 1.2 w ${PDF_LEFT} 724 m ${PDF_RIGHT} 724 l S\n`;
+  stream += `BT /F2 8 Tf ${PDF_BLUE} rg 1 0 0 1 ${PDF_LEFT} 734 Tm (${pdfEscape("TAX DUE DILIGENCE")}) Tj ET\n`;
+  stream += `BT /F1 8 Tf ${PDF_MUTED} rg 1 0 0 1 ${projectX.toFixed(1)} 734 Tm (${pdfEscape(report.project)}) Tj ET\n`;
+  stream += `${PDF_LINE} RG 0.6 w ${PDF_LEFT} 48 m ${PDF_RIGHT} 48 l S\n`;
+  stream += `BT /F1 8 Tf ${PDF_MUTED} rg 1 0 0 1 ${PDF_LEFT} 34 Tm (${pdfEscape("Confidential")}) Tj ET\n`;
+  const label = `Page ${pageNo} of ${pageCount}`;
+  const labelX = PDF_RIGHT - pdfTextWidth(label, 8);
+  stream += `BT /F1 8 Tf ${PDF_MUTED} rg 1 0 0 1 ${labelX.toFixed(1)} 34 Tm (${pdfEscape(label)}) Tj ET\n`;
+  let y = 700;
+  for (const item of items) {
+    stream += item.draw(y);
+    y -= item.h;
+  }
+  return stream;
+}
+
 function pdfBytes(objects: string[]) {
   const encoder = new TextEncoder();
   const chunks: Uint8Array[] = [encoder.encode("%PDF-1.4\n")];
@@ -293,19 +632,8 @@ function pdfBytes(objects: string[]) {
   return out;
 }
 
-export function issueReportPdf(lines: string[]) {
-  const wrapped: { text: string; heading: boolean }[] = [];
-  lines.forEach((line, index) => {
-    const heading = index === 0 || /^\d+\. /.test(line);
-    for (const row of wrapReportLine(line, heading ? 72 : 92)) {
-      wrapped.push({ text: row, heading });
-    }
-  });
-  const pageSize = 40;
-  const pages: { text: string; heading: boolean }[][] = [];
-  for (let i = 0; i < wrapped.length; i += pageSize) pages.push(wrapped.slice(i, i + pageSize));
-  if (pages.length === 0) pages.push([]);
-
+export function issueReportPdf(report: IssueReport) {
+  const pages = paginate(pdfItems(report));
   const objects = ["", "", "", "", ""];
   const firstPage = 5;
   objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
@@ -314,35 +642,21 @@ export function issueReportPdf(lines: string[]) {
     .join(" ")}] /Count ${pages.length} >>`;
   objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
   objects[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
-  pages.forEach((rows, index) => {
+  pages.forEach((items, index) => {
     const pageObj = firstPage + index * 2;
     const contentObj = pageObj + 1;
-    let stream = "BT\n";
-    let font = "";
-    let y = 740;
-    for (const row of rows) {
-      const next = row.heading ? "F2" : "F1";
-      const size = row.heading ? 13 : 11;
-      if (next !== font) {
-        stream += `/${next} ${size} Tf\n`;
-        font = next;
-      }
-      stream += `1 0 0 1 72 ${y} Tm (${pdfEscape(row.text)}) Tj\n`;
-      y -= 16;
-    }
-    stream += "ET";
+    const stream = paintPage(items, index + 1, pages.length, report);
     objects[contentObj] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
     objects[pageObj] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObj} 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>`;
   });
-
   const bytes = pdfBytes(objects);
   const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   return new Blob([copy], { type: "application/pdf" });
 }
 
-export function downloadIssueReport(filename: string, lines: string[], format: ReportFormat) {
-  const blob = format === "pdf" ? issueReportPdf(lines) : issueReportDocx(lines);
+export function downloadIssueReport(filename: string, report: IssueReport, format: ReportFormat) {
+  const blob = format === "pdf" ? issueReportPdf(report) : issueReportDocx(report);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -350,3 +664,6 @@ export function downloadIssueReport(filename: string, lines: string[], format: R
   link.click();
   URL.revokeObjectURL(url);
 }
+
+
+
