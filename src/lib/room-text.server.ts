@@ -2,33 +2,26 @@ import { inflateRawSync } from "node:zlib";
 
 const MAX_CHARS = 6000;
 
-function clip(text: string) {
-  const clean = text.replace(/\u0000/g, "").replace(/[ \t]+\n/g, "\n").trim();
-  if (clean.length <= MAX_CHARS) return clean;
-  return `${clean.slice(0, MAX_CHARS)}\n[truncated]`;
+function clip(text: string, max = MAX_CHARS) {
+  const clean = text
+    .replace(/\u0000/g, "")
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max)}\n[truncated]`;
 }
 
-function pdfText(bytes: Buffer) {
-  const latin = bytes.toString("latin1");
-  const parts: string[] = [];
-  const re = /\((?:\\.|[^\\)]){1,800}\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(latin))) {
-    let value = match[0].slice(1, -1);
-    value = value
-      .replace(/\\n/g, "\n")
-      .replace(/\\r/g, " ")
-      .replace(/\\t/g, " ")
-      .replace(/\\\(/g, "(")
-      .replace(/\\\)/g, ")")
-      .replace(/\\\\/g, "\\")
-      .replace(/\\([0-7]{1,3})/g, (_, oct: string) =>
-        String.fromCharCode(Number.parseInt(oct, 8)),
-      );
-    if (/[A-Za-z0-9]/.test(value)) parts.push(value);
-    if (parts.join(" ").length > MAX_CHARS) break;
+async function pdfText(bytes: Buffer) {
+  try {
+    const { extractText } = await import("unpdf");
+    const extracted = await extractText(new Uint8Array(bytes), { mergePages: true });
+    const raw = Array.isArray(extracted.text) ? extracted.text.join("\n\n") : extracted.text;
+    return clip(raw ?? "", 20000);
+  } catch {
+    return "";
   }
-  return clip(parts.join(" "));
 }
 
 function zipEntry(bytes: Buffer, wanted: string): Buffer | null {
@@ -122,7 +115,7 @@ export async function extractRoomText(name: string, mimeType: string, bytes: Buf
   if (lower.endsWith(".docx") || lower.includes("wordprocessingml")) {
     return docxText(bytes);
   }
-  if (lower.endsWith(".pdf") || mimeType === "application/pdf") {
+  if (lower.endsWith(".pdf") || mimeType === "application/pdf" || bytes.subarray(0, 5).toString() === "%PDF-") {
     return pdfText(bytes);
   }
   return "";
