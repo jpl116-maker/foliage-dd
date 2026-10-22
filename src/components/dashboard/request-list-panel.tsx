@@ -60,22 +60,110 @@ const STATUS_BTN: Record<
   },
 };
 
+type XlsxCell = { v?: string; t?: string; s?: Record<string, unknown> };
+type XlsxSheet = Record<string, unknown> & {
+  "!cols"?: { wch: number }[];
+  "!rows"?: ({ hpt: number } | null)[];
+  "!ref"?: string;
+  "!autofilter"?: { ref: string };
+};
+
 type XlsxBook = {
   utils: {
-    aoa_to_sheet: (rows: string[][]) => { "!cols"?: { wch: number }[] };
+    aoa_to_sheet: (rows: string[][]) => XlsxSheet;
     book_new: () => object;
     book_append_sheet: (book: object, sheet: object, name: string) => void;
+    encode_cell: (cell: { r: number; c: number }) => string;
+    encode_range: (range: { s: { r: number; c: number }; e: { r: number; c: number } }) => string;
   };
   writeFile: (book: object, filename: string) => void;
 };
 
+const THIN = { style: "thin", color: { rgb: "D9D9D9" } };
+const BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+
+const HEADER_STYLE = {
+  font: { bold: true, color: { rgb: "FFFFFF" }, name: "Calibri", sz: 11 },
+  fill: { patternType: "solid", fgColor: { rgb: "1F4E79" } },
+  alignment: { vertical: "center", horizontal: "left", wrapText: true },
+  border: BORDER,
+};
+
+const BODY_STYLE = {
+  font: { name: "Calibri", sz: 11, color: { rgb: "1A1D24" } },
+  fill: { patternType: "solid", fgColor: { rgb: "FFFFFF" } },
+  alignment: { vertical: "top", wrapText: true },
+  border: BORDER,
+};
+
+const STATUS_STYLE: Record<string, Record<string, unknown>> = {
+  Open: {
+    font: { bold: true, name: "Calibri", sz: 11, color: { rgb: "9C1B1B" } },
+    fill: { patternType: "solid", fgColor: { rgb: "F4CCCC" } },
+    alignment: { vertical: "center", horizontal: "center" },
+    border: BORDER,
+  },
+  Partial: {
+    font: { bold: true, name: "Calibri", sz: 11, color: { rgb: "7A5800" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FFF2CC" } },
+    alignment: { vertical: "center", horizontal: "center" },
+    border: BORDER,
+  },
+  Closed: {
+    font: { bold: true, name: "Calibri", sz: 11, color: { rgb: "1E5C38" } },
+    fill: { patternType: "solid", fgColor: { rgb: "D9EAD3" } },
+    alignment: { vertical: "center", horizontal: "center" },
+    border: BORDER,
+  },
+};
+
+const STATUS_COLUMN = 3;
+
 async function loadXlsx(): Promise<XlsxBook> {
-  const mod = (await import("xlsx")) as { default?: XlsxBook } & Partial<XlsxBook>;
+  const mod = (await import("xlsx-js-style")) as { default?: XlsxBook } & Partial<XlsxBook>;
   const candidate: Partial<XlsxBook> | undefined = mod.writeFile ? mod : mod.default;
-  if (!candidate?.utils || !candidate.writeFile) {
+  if (!candidate?.utils?.encode_cell || !candidate.writeFile) {
     throw new Error("Excel export is unavailable");
   }
   return candidate as XlsxBook;
+}
+
+function styleRequestSheet(xlsx: XlsxBook, rows: string[][]): XlsxSheet {
+  const sheet = xlsx.utils.aoa_to_sheet(rows);
+  const lastRow = Math.max(rows.length - 1, 0);
+  const lastCol = 5;
+  for (let r = 0; r <= lastRow; r++) {
+    for (let c = 0; c <= lastCol; c++) {
+      const ref = xlsx.utils.encode_cell({ r, c });
+      const cell = sheet[ref] as XlsxCell | undefined;
+      if (!cell) continue;
+      if (r === 0) cell.s = HEADER_STYLE;
+      else if (c === STATUS_COLUMN) cell.s = STATUS_STYLE[String(cell.v)] ?? BODY_STYLE;
+      else cell.s = BODY_STYLE;
+    }
+  }
+  sheet["!cols"] = [
+    { wch: 28 },
+    { wch: 42 },
+    { wch: 64 },
+    { wch: 14 },
+    { wch: 36 },
+    { wch: 48 },
+  ];
+  sheet["!rows"] = rows.map((row, index) => {
+    const lines = row.reduce(
+      (max, value) => Math.max(max, String(value).split("\n").length),
+      1,
+    );
+    return { hpt: index === 0 ? 22 : Math.min(90, Math.max(18, lines * 15)) };
+  });
+  sheet["!autofilter"] = {
+    ref: xlsx.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: lastRow, c: lastCol },
+    }),
+  };
+  return sheet;
 }
 
 function requestExportRows(
@@ -213,15 +301,7 @@ export function RequestListPanel() {
     setExporting(true);
     try {
       const xlsx = await loadXlsx();
-      const sheet = xlsx.utils.aoa_to_sheet(requestExportRows(categories, requests));
-      sheet["!cols"] = [
-        { wch: 28 },
-        { wch: 42 },
-        { wch: 64 },
-        { wch: 12 },
-        { wch: 36 },
-        { wch: 48 },
-      ];
+      const sheet = styleRequestSheet(xlsx, requestExportRows(categories, requests));
       const book = xlsx.utils.book_new();
       xlsx.utils.book_append_sheet(book, sheet, "Request list");
       const workspaceLabel = workspace === "asset" ? "asset" : "entity";
