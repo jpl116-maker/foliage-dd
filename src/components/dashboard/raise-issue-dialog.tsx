@@ -195,7 +195,7 @@ export function RaiseIssueDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="top-3 max-h-[calc(100dvh-1.5rem)] translate-y-0 sm:top-1/2 sm:max-h-[90dvh] sm:-translate-y-1/2">
         <DialogTitle>{editing ? "Edit issue" : "Raise an issue"}</DialogTitle>
         <DialogDescription>
           {editing

@@ -165,7 +165,18 @@ export function DataRoomBrowser({
   const [moveOptions, setMoveOptions] = useState<RoomFolderOption[] | null>(null);
   const [deleteItem, setDeleteItem] = useState<DeleteItem | null>(null);
   const [raiseOpen, setRaiseOpen] = useState(false);
+  const raiseLock = useRef(false);
   const [previewWide, setPreviewWide] = useState(false);
+
+  function closePreview() {
+    setPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+    raiseLock.current = false;
+    setRaiseOpen(false);
+    setPreviewWide(false);
+  }
 
   const q = query.trim();
   const searchingRoom = q.length > 0;
@@ -858,22 +869,23 @@ export function DataRoomBrowser({
       </Dialog>
 
       <Dialog
-        open={Boolean(preview)}
+        open={Boolean(preview) && !raiseOpen}
         onOpenChange={(open) => {
-          if (!open) {
-            if (preview?.url) URL.revokeObjectURL(preview.url);
-            setPreview(null);
-            setRaiseOpen(false);
-            setPreviewWide(false);
-          }
+          if (!open && !raiseLock.current) closePreview();
         }}
       >
         <DialogContent
+          onInteractOutside={(event) => {
+            if (raiseLock.current) event.preventDefault();
+          }}
+          onFocusOutside={(event) => {
+            if (raiseLock.current) event.preventDefault();
+          }}
           className={
             previewWide
               ? "top-0 left-0 flex h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-none"
               : preview?.sheets
-                ? "flex max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-5xl flex-col overflow-hidden"
+                ? "flex max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-5xl flex-col"
                 : undefined
           }
         >
@@ -887,7 +899,7 @@ export function DataRoomBrowser({
                 className={
                   previewWide
                     ? "mt-4 min-h-0 flex-1 overflow-hidden rounded-md bg-paper shadow-[var(--shadow-border)]"
-                    : "mt-4 overflow-hidden rounded-md bg-paper shadow-[var(--shadow-border)]"
+                    : "mt-4 min-h-0 overflow-hidden rounded-md bg-paper shadow-[var(--shadow-border)]"
                 }
               >
                 {preview.sheets ? (
@@ -926,7 +938,7 @@ export function DataRoomBrowser({
                   </p>
                 )}
               </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
@@ -949,7 +961,10 @@ export function DataRoomBrowser({
                   {canRaise ? (
                     <Button
                       type="button"
-                      onClick={() => setRaiseOpen(true)}
+                      onClick={() => {
+                        raiseLock.current = true;
+                        setRaiseOpen(true);
+                      }}
                     >
                       <Plus className="size-4" />
                       Raise an issue
@@ -1011,7 +1026,10 @@ export function DataRoomBrowser({
       {preview && canRaise ? (
         <RaiseIssueDialog
           open={raiseOpen}
-          onOpenChange={setRaiseOpen}
+          onOpenChange={(open) => {
+            raiseLock.current = open;
+            setRaiseOpen(open);
+          }}
           presetFile={{
             id: preview.id,
             folderId: preview.folderId,
