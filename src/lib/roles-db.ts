@@ -56,19 +56,12 @@ export const ensureNamedAdmin = createServerFn({ method: "POST" }).handler(
         where "id" = ${userId}
       `;
     }
-    if (!NAMED_ADMIN_PASSWORD) return { ok: true as const };
-    const passwordHash = await hashPassword(NAMED_ADMIN_PASSWORD);
     const accounts = await q<{ id: string }>`
       select id from account
       where "userId" = ${userId} and "providerId" = 'credential'
     `;
-    if (accounts[0]) {
-      await q`
-        update account
-        set "password" = ${passwordHash}, "updatedAt" = now()
-        where "id" = ${accounts[0].id}
-      `;
-    } else {
+    if (!accounts[0] && NAMED_ADMIN_PASSWORD) {
+      const passwordHash = await hashPassword(NAMED_ADMIN_PASSWORD);
       const accountId = uid("acc");
       await q`
         insert into account (
