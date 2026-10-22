@@ -115,7 +115,7 @@ export function StatsRow({ showReviewed }: { showReviewed?: boolean }) {
       {
         label: "Days remaining",
         value: remaining < 0 ? `${Math.abs(remaining)}` : String(remaining),
-        hint: remaining < 0 ? "Past the diligence date" : "Until the diligence date",
+        hint: remaining < 0 ? "Past the due date" : "Until the due date",
         icon: CalendarClock,
         href: undefined,
       },

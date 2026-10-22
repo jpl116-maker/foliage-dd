@@ -13,11 +13,6 @@ function ProjectHome() {
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-      <p className="folia-enter mb-6 max-w-2xl text-sm text-muted">
-        Tax due diligence on the client files for this matter. Mark each document
-        as it is reviewed. Findings land on the issues card so nothing sits only
-        in a workpaper note.
-      </p>
       <StatsRow showReviewed />
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-12">
         <div className="min-w-0 lg:col-span-7">
