@@ -49,6 +49,7 @@ export function RaiseIssueDialog({
   presetCategoryId,
   presetFile = null,
   issue = null,
+  embedded = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -56,6 +57,8 @@ export function RaiseIssueDialog({
   presetCategoryId?: CategoryId;
   presetFile?: { id: string; folderId: string; name: string } | null;
   issue?: Issue | null;
+  /** Render inside the data-room review panel instead of a second dialog. */
+  embedded?: boolean;
 }) {
   const categories = useDdStore((s) => s.categories);
   const workspace = useDdStore((s) => s.workspace);
@@ -90,7 +93,7 @@ export function RaiseIssueDialog({
     setSeverity(issue?.severity ?? "medium");
     setCategoryId(fallbackCategory);
     setCodeSection(issue?.codeSection ?? "");
-    setLink(null);
+    setLink(issue ? null : linkFromPreset(presetFile));
     setFileQuery("");
     let cancelled = false;
     setFiles(null);
@@ -193,16 +196,14 @@ export function RaiseIssueDialog({
     onOpenChange(false);
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-3 max-h-[calc(100dvh-1.5rem)] translate-y-0 sm:top-1/2 sm:max-h-[90dvh] sm:-translate-y-1/2">
-        <DialogTitle>{editing ? "Edit issue" : "Raise an issue"}</DialogTitle>
-        <DialogDescription>
-          {editing
-            ? "Update the finding and the linked data-room file or folder."
-            : "Flag a finding from due diligence and link the data-room file or folder where you saw it."}
-        </DialogDescription>
-        <form className="mt-5 grid gap-4" onSubmit={submit}>
+  const heading = editing ? "Edit issue" : "Raise an issue";
+  const blurb = editing
+    ? "Update the finding and the linked data-room file or folder."
+    : "Flag a finding from due diligence and link the data-room file or folder where you saw it.";
+
+  const form = (
+    <form className="mt-4 flex min-h-0 flex-1 flex-col" onSubmit={submit}>
+          <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto">
           <div className="grid gap-2">
             <Label htmlFor="issue-title">Title</Label>
             <Input
@@ -220,6 +221,7 @@ export function RaiseIssueDialog({
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
               placeholder="What you saw, why it matters, what to do next."
+              className="min-h-20"
               required
             />
           </div>
@@ -420,7 +422,8 @@ export function RaiseIssueDialog({
               )
             ) : null}
           </div>
-          <div className="flex justify-end gap-2 pt-1">
+          </div>
+          <div className="mt-3 flex shrink-0 justify-end gap-2 border-t border-border pt-3">
             <Button
               type="button"
               variant="ghost"
@@ -431,9 +434,43 @@ export function RaiseIssueDialog({
             <Button type="submit">{editing ? "Save" : "Raise issue"}</Button>
           </div>
         </form>
+  );
+
+  if (embedded) {
+    if (!open) return null;
+    return (
+      <section className="flex min-h-0 flex-1 flex-col" aria-label={heading}>
+        <h2 className="font-display text-xl leading-snug tracking-tight text-ink">
+          {heading}
+        </h2>
+        <p className="mt-1 text-sm text-muted">{blurb}</p>
+        {form}
+      </section>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[min(92dvh,calc(100dvh-1rem))] flex-col overflow-hidden">
+        <DialogTitle>{heading}</DialogTitle>
+        <DialogDescription>{blurb}</DialogDescription>
+        {form}
       </DialogContent>
     </Dialog>
   );
+}
+
+function linkFromPreset(
+  presetFile: { id: string; folderId: string; name: string } | null,
+): RoomLink | null {
+  if (!presetFile) return null;
+  return {
+    kind: "file",
+    id: presetFile.id,
+    folderId: presetFile.folderId,
+    name: presetFile.name,
+    path: presetFile.name,
+  };
 }
 
 function parentPath(path: string, name: string) {

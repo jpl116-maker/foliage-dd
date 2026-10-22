@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
   Check,
@@ -48,6 +48,7 @@ import {
   type RoomSearchHit,
 } from "@/lib/data-room";
 import { useDdStore } from "@/lib/store";
+import { SEVERITY_LABEL } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { roomRoot } from "@/lib/workspace";
 import { useRole } from "@/components/auth/role-provider";
@@ -134,6 +135,7 @@ export function DataRoomBrowser({
   const canDelete = can("deleteRoom");
   const canRaise = can("raiseIssues");
   const documents = useDdStore((s) => s.documents);
+  const issues = useDdStore((s) => s.issues);
   const setDocumentStatus = useDdStore((s) => s.setDocumentStatus);
   const pruneRoomLinks = useDdStore((s) => s.pruneRoomLinks);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -165,7 +167,6 @@ export function DataRoomBrowser({
   const [moveOptions, setMoveOptions] = useState<RoomFolderOption[] | null>(null);
   const [deleteItem, setDeleteItem] = useState<DeleteItem | null>(null);
   const [raiseOpen, setRaiseOpen] = useState(false);
-  const raiseLock = useRef(false);
   const [previewWide, setPreviewWide] = useState(false);
 
   function closePreview() {
@@ -173,7 +174,6 @@ export function DataRoomBrowser({
       if (current?.url) URL.revokeObjectURL(current.url);
       return null;
     });
-    raiseLock.current = false;
     setRaiseOpen(false);
     setPreviewWide(false);
   }
@@ -492,6 +492,15 @@ export function DataRoomBrowser({
 
   const empty = view.folders.length === 0 && view.files.length === 0;
   const searchHits = hits ?? [];
+  const fileIssues = useMemo(() => {
+    if (!preview) return [];
+    const docId = documentIdFromPreviewFolder(preview.folderId);
+    return issues.filter(
+      (issue) =>
+        issue.roomFileId === preview.id ||
+        (!issue.roomFileId && docId != null && issue.documentId === docId),
+    );
+  }, [issues, preview]);
 
   if (listing.folder.projectId !== project.id) {
     return (
@@ -869,75 +878,143 @@ export function DataRoomBrowser({
       </Dialog>
 
       <Dialog
-        open={Boolean(preview) && !raiseOpen}
+        open={Boolean(preview)}
         onOpenChange={(open) => {
-          if (!open && !raiseLock.current) closePreview();
+          if (!open) closePreview();
         }}
       >
         <DialogContent
-          onInteractOutside={(event) => {
-            if (raiseLock.current) event.preventDefault();
+          onPointerDownOutside={(event) => {
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest("[data-radix-select-content], [role='listbox']")
+            ) {
+              event.preventDefault();
+            }
           }}
-          onFocusOutside={(event) => {
-            if (raiseLock.current) event.preventDefault();
+          onInteractOutside={(event) => {
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest("[data-radix-select-content], [role='listbox']")
+            ) {
+              event.preventDefault();
+            }
           }}
           className={
             previewWide
               ? "top-0 left-0 flex h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-none"
-              : preview?.sheets
-                ? "flex max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-5xl flex-col"
-                : undefined
+              : cn(
+                  "flex max-h-[min(92dvh,calc(100dvh-1rem))] w-[calc(100%-1.5rem)] flex-col overflow-hidden",
+                  preview?.sheets || raiseOpen ? "max-w-6xl" : undefined,
+                )
           }
         >
           {preview ? (
             <>
-              <DialogTitle>{preview.name}</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="shrink-0">{preview.name}</DialogTitle>
+              <DialogDescription className="shrink-0">
                 {preview.mimeType} · {formatBytes(preview.sizeBytes)}
               </DialogDescription>
               <div
-                className={
-                  previewWide
-                    ? "mt-4 min-h-0 flex-1 overflow-hidden rounded-md bg-paper shadow-[var(--shadow-border)]"
-                    : "mt-4 min-h-0 overflow-hidden rounded-md bg-paper shadow-[var(--shadow-border)]"
-                }
-              >
-                {preview.sheets ? (
-                  <SpreadsheetPreview sheets={preview.sheets} tall={previewWide} />
-                ) : preview.mimeType.startsWith("image/") ? (
-                  <img
-                    src={preview.url}
-                    alt={preview.name}
-                    className={
-                      previewWide
-                        ? "h-full w-full object-contain"
-                        : "max-h-72 w-full object-contain"
-                    }
-                  />
-                ) : preview.mimeType === "application/pdf" ? (
-                  <iframe
-                    title={preview.name}
-                    src={preview.url}
-                    className={
-                      previewWide ? "h-full w-full bg-paper" : "h-72 w-full bg-paper"
-                    }
-                  />
-                ) : preview.text ? (
-                  <pre
-                    className={
-                      previewWide
-                        ? "h-full overflow-auto p-3 text-xs text-ink"
-                        : "max-h-72 overflow-auto p-3 text-xs text-ink"
-                    }
-                  >
-                    {preview.text}
-                  </pre>
-                ) : (
-                  <p className="px-4 py-8 text-center text-sm text-muted">
-                    Preview is not available for this type. Download the file to open it.
-                  </p>
+                className={cn(
+                  "mt-4 flex min-h-0 flex-1 flex-col gap-4",
+                  raiseOpen && "lg:flex-row",
                 )}
+              >
+                <div
+                  className={cn(
+                    "min-h-0 overflow-hidden rounded-md bg-paper shadow-[var(--shadow-border)]",
+                    previewWide
+                      ? "flex min-h-0 flex-1 flex-col"
+                      : preview.sheets
+                        ? "flex max-h-[min(22rem,40dvh)] min-h-0 flex-1 flex-col"
+                        : "max-h-72 shrink-0",
+                    raiseOpen && "hidden lg:flex lg:max-h-none lg:min-h-48 lg:flex-1",
+                  )}
+                >
+                  {preview.sheets ? (
+                    <SpreadsheetPreview
+                      sheets={preview.sheets}
+                      tall={previewWide || raiseOpen || Boolean(preview.sheets)}
+                    />
+                  ) : preview.mimeType.startsWith("image/") ? (
+                    <img
+                      src={preview.url}
+                      alt={preview.name}
+                      className={
+                        previewWide || raiseOpen
+                          ? "h-full w-full object-contain"
+                          : "max-h-72 w-full object-contain"
+                      }
+                    />
+                  ) : preview.mimeType === "application/pdf" ? (
+                    <iframe
+                      title={preview.name}
+                      src={preview.url}
+                      className={
+                        previewWide || raiseOpen
+                          ? "h-full min-h-48 w-full bg-paper"
+                          : "h-72 w-full bg-paper"
+                      }
+                    />
+                  ) : preview.text ? (
+                    <pre
+                      className={
+                        previewWide || raiseOpen
+                          ? "h-full min-h-32 overflow-auto p-3 text-xs text-ink"
+                          : "max-h-72 overflow-auto p-3 text-xs text-ink"
+                      }
+                    >
+                      {preview.text}
+                    </pre>
+                  ) : (
+                    <p className="px-4 py-8 text-center text-sm text-muted">
+                      Preview is not available for this type. Download the file to open it.
+                    </p>
+                  )}
+                </div>
+                {raiseOpen && canRaise ? (
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:w-96 lg:flex-none">
+                    <RaiseIssueDialog
+                      embedded
+                      open={raiseOpen}
+                      onOpenChange={setRaiseOpen}
+                      presetFile={{
+                        id: preview.id,
+                        folderId: preview.folderId,
+                        name: preview.name,
+                      }}
+                      presetDocumentId={documentIdFromPreviewFolder(preview.folderId)}
+                      presetCategoryId={
+                        documents.find(
+                          (d) => d.id === documentIdFromPreviewFolder(preview.folderId),
+                        )?.categoryId
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
+              {fileIssues.length > 0 && !raiseOpen ? (
+                <div className="mt-3 max-h-28 shrink-0 overflow-y-auto rounded-md bg-paper px-3 py-2 shadow-[var(--shadow-border)]">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                    Issues on this file
+                  </p>
+                  <ul className="mt-1">
+                    {fileIssues.map((issue) => (
+                      <li key={issue.id} className="truncate py-0.5 text-sm text-ink">
+                        {issue.title}
+                        <span className="text-muted">
+                          {" "}
+                          · {SEVERITY_LABEL[issue.severity]}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {!raiseOpen ? (
               <div className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -959,13 +1036,7 @@ export function DataRoomBrowser({
                     </Link>
                   </Button>
                   {canRaise ? (
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        raiseLock.current = true;
-                        setRaiseOpen(true);
-                      }}
-                    >
+                    <Button type="button" onClick={() => setRaiseOpen(true)}>
                       <Plus className="size-4" />
                       Raise an issue
                     </Button>
@@ -1018,31 +1089,17 @@ export function DataRoomBrowser({
                   </Button>
                 </div>
               </div>
+              ) : (
+                <div className="mt-3 flex shrink-0 justify-start">
+                  <Button type="button" variant="ghost" onClick={() => setRaiseOpen(false)}>
+                    Back to file
+                  </Button>
+                </div>
+              )}
             </>
           ) : null}
         </DialogContent>
       </Dialog>
-
-      {preview && canRaise ? (
-        <RaiseIssueDialog
-          open={raiseOpen}
-          onOpenChange={(open) => {
-            raiseLock.current = open;
-            setRaiseOpen(open);
-          }}
-          presetFile={{
-            id: preview.id,
-            folderId: preview.folderId,
-            name: preview.name,
-          }}
-          presetDocumentId={documentIdFromPreviewFolder(preview.folderId)}
-          presetCategoryId={
-            documents.find(
-              (d) => d.id === documentIdFromPreviewFolder(preview.folderId),
-            )?.categoryId
-          }
-        />
-      ) : null}
 
       <Dialog
         open={Boolean(deleteItem)}

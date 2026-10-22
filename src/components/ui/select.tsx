@@ -40,12 +40,12 @@ export function SelectContent({
       <SelectPrimitive.Content
         position="popper"
         className={cn(
-          "z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md bg-surface text-ink shadow-[var(--shadow-border)]",
+          "z-[80] max-h-60 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md bg-surface text-ink shadow-[var(--shadow-border)]",
           className,
         )}
         {...props}
       >
-        <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
+        <SelectPrimitive.Viewport className="max-h-60 overflow-y-auto p-1">{children}</SelectPrimitive.Viewport>
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );
