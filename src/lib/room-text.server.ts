@@ -9,12 +9,28 @@ function clean(text: string) {
     .trim();
 }
 
-async function pdfText(bytes: Buffer) {
+async function pdfText(bytes: Buffer, maxPages?: number) {
   try {
-    const { extractText } = await import("unpdf");
-    const extracted = await extractText(new Uint8Array(bytes), { mergePages: true });
-    const raw = Array.isArray(extracted.text) ? extracted.text.join("\n\n") : extracted.text;
-    return clean(raw ?? "");
+    const { getDocumentProxy } = await import("unpdf");
+    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    try {
+      const last = maxPages ? Math.min(pdf.numPages, maxPages) : pdf.numPages;
+      const parts: string[] = [];
+      for (let pageNumber = 1; pageNumber <= last; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        const content = await page.getTextContent();
+        const line = content.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" ")
+          .replace(/[ \t]{2,}/g, " ")
+          .trim();
+        if (line) parts.push(line);
+      }
+      return clean(parts.join("\n\n"));
+    } finally {
+      const closer = pdf as { destroy?: () => Promise<void> };
+      if (closer.destroy) await closer.destroy();
+    }
   } catch {
     return "";
   }
@@ -62,7 +78,7 @@ function docxText(bytes: Buffer) {
   return clean(text);
 }
 
-async function sheetText(bytes: Buffer, name: string) {
+async function sheetText(bytes: Buffer, name: string, maxSheets?: number, maxRows?: number) {
   const mod: Record<string, unknown> = await import("xlsx");
   const inner = (mod.default ?? mod) as Record<string, unknown>;
   const XLSX = (
@@ -75,15 +91,28 @@ async function sheetText(bytes: Buffer, name: string) {
     utils: { sheet_to_csv: (sheet: unknown, opts: object) => string };
   };
   const wb = XLSX.read(bytes, { type: "buffer", cellDates: true });
+  const names = maxSheets ? wb.SheetNames.slice(0, maxSheets) : wb.SheetNames;
   const chunks: string[] = [];
-  for (const sheetName of wb.SheetNames) {
+  for (const sheetName of names) {
     const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName] ?? {}, { blankrows: false });
-    chunks.push(`# ${sheetName}\n${csv}`);
+    const lines = maxRows ? csv.split(/\r?\n/).slice(0, maxRows) : csv.split(/\r?\n/);
+    chunks.push(`# ${sheetName}\n${lines.join("\n")}`);
   }
   return clean(chunks.join("\n\n") || name);
 }
 
-export async function extractRoomText(name: string, mimeType: string, bytes: Buffer) {
+export type RoomTextLimits = {
+  maxPages?: number;
+  maxSheets?: number;
+  maxRows?: number;
+};
+
+export async function extractRoomText(
+  name: string,
+  mimeType: string,
+  bytes: Buffer,
+  limits: RoomTextLimits = {},
+) {
   const lower = `${name} ${mimeType}`.toLowerCase();
   if (!bytes.length) return "";
   if (
@@ -104,13 +133,13 @@ export async function extractRoomText(name: string, mimeType: string, bytes: Buf
     lower.includes("spreadsheet") ||
     lower.includes("excel")
   ) {
-    return sheetText(bytes, name);
+    return sheetText(bytes, name, limits.maxSheets, limits.maxRows);
   }
   if (lower.endsWith(".docx") || lower.includes("wordprocessingml")) {
     return docxText(bytes);
   }
   if (lower.endsWith(".pdf") || mimeType === "application/pdf" || bytes.subarray(0, 5).toString() === "%PDF-") {
-    return pdfText(bytes);
+    return pdfText(bytes, limits.maxPages);
   }
   return "";
 }

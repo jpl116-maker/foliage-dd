@@ -6,6 +6,15 @@ import { roomRoot, type WorkspaceId } from "@/lib/workspace";
 
 const workspaceSchema = z.enum(["entity", "asset"]);
 
+export const SEARCH_INTENSITIES = ["low", "medium", "high"] as const;
+export type SearchIntensity = (typeof SEARCH_INTENSITIES)[number];
+
+const INTENSITY = {
+  low: { files: 1, chars: 2_500, pages: 2, sheets: 1, rows: 20, tokens: 350 },
+  medium: { files: 2, chars: 8_000, pages: 6, sheets: 2, rows: 80, tokens: 700 },
+  high: { files: 6, chars: 1_600_000, pages: 0, sheets: 0, rows: 0, tokens: 1200 },
+} as const;
+
 export type AskRoomFile = {
   id: string;
   name: string;
@@ -132,6 +141,7 @@ export const askDataRoom = createServerFn({ method: "POST" })
       projectId: z.string().min(1).max(80),
       workspace: workspaceSchema,
       prompt: z.string().trim().min(1).max(2000),
+      intensity: z.enum(SEARCH_INTENSITIES).default("medium"),
     }),
   )
   .handler(async ({ context, data }) => {
@@ -159,13 +169,15 @@ export const askDataRoom = createServerFn({ method: "POST" })
         ? `\n${files.length - listed.length} more files are not listed.`
         : "";
 
+    const plan = INTENSITY[data.intensity];
+
     let first: ModelJson;
     try {
       const raw = await complete(
         apiKey,
-        `You answer questions about one due diligence data room. Reply with JSON only: {"answer": string or null, "read": string[], "open": string[]}. read is up to 6 catalog ids whose full text you need, most relevant first. Use an empty read list only when names and folders are enough. open is the ids the user should see opened in the data room. Never invent ids. Catalog columns are id, folder, name:\n${catalogText}${more}`,
+        `You answer questions about one due diligence data room. Reply with JSON only: {"answer": string or null, "read": string[], "open": string[]}. read is up to ${plan.files} catalog ids whose text you need, most relevant first. Use an empty read list only when names and folders are enough. open is the ids the user should see opened in the data room. Never invent ids. Catalog columns are id, folder, name:\n${catalogText}${more}`,
         data.prompt,
-        500,
+        400,
       );
       first = parseModelJson(raw);
     } catch (err) {
@@ -175,7 +187,7 @@ export const askDataRoom = createServerFn({ method: "POST" })
 
     const readIds = [...new Set(first.read ?? [])]
       .filter((id) => byId.has(id))
-      .slice(0, 6);
+      .slice(0, plan.files);
 
     let answer = first.answer?.trim() || "";
     let openIds = first.open ?? [];
@@ -183,17 +195,18 @@ export const askDataRoom = createServerFn({ method: "POST" })
     if (readIds.length > 0) {
       const { readFileBytes } = await import("@/lib/data-room");
       const { extractRoomText } = await import("@/lib/room-text.server");
-      // grok-4.5 accepts 500k tokens. This stays inside that window so a
-      // hundreds-of-pages PDF is sent whole instead of being rejected.
-      const FILE_TEXT_BUDGET = 1_600_000;
       const blocks: string[] = [];
-      let remaining = FILE_TEXT_BUDGET;
+      let remaining = plan.chars;
       for (const id of readIds) {
         const file = byId.get(id);
         if (!file || remaining <= 0) continue;
         try {
           const stored = await readFileBytes(id, context.userId);
-          let text = await extractRoomText(stored.name, stored.mimeType, stored.bytes);
+          let text = await extractRoomText(stored.name, stored.mimeType, stored.bytes, {
+            maxPages: plan.pages || undefined,
+            maxSheets: plan.sheets || undefined,
+            maxRows: plan.rows || undefined,
+          });
           if (!text) text = "(no readable text)";
           if (text.length > remaining) {
             text = `${text.slice(0, remaining)}\n[remainder of this file was not sent]`;
@@ -204,12 +217,16 @@ export const askDataRoom = createServerFn({ method: "POST" })
           blocks.push(`FILE ${file.id}\n${file.name}\n(could not read this file)`);
         }
       }
+      const scope =
+        data.intensity === "high"
+          ? "Each FILE block is the full extracted text of that data-room file, not an excerpt. Use facts that appear anywhere in that text."
+          : "Each FILE block is only the beginning of that file. Answer from that text. If the fact is not there, say it was not in the portion read at this search intensity.";
       try {
         const raw = await complete(
           apiKey,
-          `Reply with JSON only: {"answer": string, "open": string[]}. answer is plain prose for a diligence reviewer. Each FILE block is the full extracted text of that data-room file, not an excerpt or sample. Use facts that appear anywhere in that text. Do not say the file or an excerpt lacks information that is present in the text. open lists catalog ids to show in the file viewer, including files the user asked to open and files the answer relies on. Allowed ids: ${files.map((file) => file.id).slice(0, 300).join(", ")}`,
+          `Reply with JSON only: {"answer": string, "open": string[]}. answer is plain prose for a diligence reviewer. ${scope} Do not say the file lacks information that is present in the text. open lists catalog ids to show in the file viewer, including files the user asked to open and files the answer relies on. Allowed ids: ${files.map((file) => file.id).slice(0, 300).join(", ")}`,
           `Question: ${data.prompt}\n\n${blocks.join("\n\n")}`,
-          1200,
+          plan.tokens,
         );
         const second = parseModelJson(raw);
         if (second.answer?.trim()) answer = second.answer.trim();
