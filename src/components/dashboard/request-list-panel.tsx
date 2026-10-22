@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { FileText, Folder, FolderUp, Search, Trash2, Upload, X } from "lucide-react";
+import { FileSpreadsheet, FileText, Folder, FolderUp, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,6 +60,57 @@ const STATUS_BTN: Record<
   },
 };
 
+type XlsxBook = {
+  utils: {
+    aoa_to_sheet: (rows: string[][]) => { "!cols"?: { wch: number }[] };
+    book_new: () => object;
+    book_append_sheet: (book: object, sheet: object, name: string) => void;
+  };
+  writeFile: (book: object, filename: string) => void;
+};
+
+async function loadXlsx(): Promise<XlsxBook> {
+  const mod = (await import("xlsx")) as { default?: XlsxBook } & Partial<XlsxBook>;
+  const candidate: Partial<XlsxBook> | undefined = mod.writeFile ? mod : mod.default;
+  if (!candidate?.utils || !candidate.writeFile) {
+    throw new Error("Excel export is unavailable");
+  }
+  return candidate as XlsxBook;
+}
+
+function requestExportRows(
+  categories: { id: string; name: string }[],
+  requests: RequestItem[],
+): string[][] {
+  const header = ["Category", "Item", "Detail", "Status", "Linked files", "Comments"];
+  const body: string[][] = [];
+  const seen = new Set<string>();
+  const line = (category: string, item: RequestItem) => {
+    seen.add(item.id);
+    const files = (item.linkedFiles ?? []).map((file) => file.name).join("\n");
+    const comments = (item.comments ?? [])
+      .map((comment) => `${comment.author} (${formatStamp(comment.createdAt)}): ${comment.body}`)
+      .join("\n");
+    body.push([
+      category,
+      item.name,
+      item.detail,
+      REQUEST_STATUS_LABEL[item.status],
+      files,
+      comments,
+    ]);
+  };
+  for (const category of categories) {
+    for (const item of requests) {
+      if (item.categoryId === category.id) line(category.name, item);
+    }
+  }
+  for (const item of requests) {
+    if (!seen.has(item.id)) line("Uncategorized", item);
+  }
+  return [header, ...body];
+}
+
 export function RequestListPanel() {
   const { can } = useRole();
   const categories = useDdStore((s) => s.categories);
@@ -75,6 +126,7 @@ export function RequestListPanel() {
   const [roomFiles, setRoomFiles] = useState<RoomFileOption[]>([]);
   const [roomFolders, setRoomFolders] = useState<RoomFolderOption[]>([]);
   const [roomTick, setRoomTick] = useState(0);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     setFilter("all");
@@ -157,6 +209,31 @@ export function RequestListPanel() {
   const partial = requests.filter((r) => r.status === "partial").length;
   const closed = requests.filter((r) => r.status === "closed").length;
 
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const xlsx = await loadXlsx();
+      const sheet = xlsx.utils.aoa_to_sheet(requestExportRows(categories, requests));
+      sheet["!cols"] = [
+        { wch: 28 },
+        { wch: 42 },
+        { wch: 64 },
+        { wch: 12 },
+        { wch: 36 },
+        { wch: 48 },
+      ];
+      const book = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(book, sheet, "Request list");
+      const workspaceLabel = workspace === "asset" ? "asset" : "entity";
+      xlsx.writeFile(book, `${project.slug}-${workspaceLabel}-request-list.xlsx`);
+      toast("Request list downloaded");
+    } catch {
+      toast("Could not export the request list");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-5 min-w-0">
@@ -175,6 +252,17 @@ export function RequestListPanel() {
             {closed} closed
           </p>
           <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-11 shrink-0"
+              disabled={exporting || requests.length === 0}
+              onClick={() => void exportExcel()}
+            >
+              <FileSpreadsheet className="size-4" />
+              Export Excel
+            </Button>
             <CloneRequestListButton />
             <RequestListEditor />
           </div>
