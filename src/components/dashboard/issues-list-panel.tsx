@@ -13,6 +13,7 @@ import {
   reportIssues,
   type ReportFormat,
 } from "@/lib/issue-report";
+import { polishIssueReport } from "@/lib/issue-report-polish";
 import { useDdStore, type IssueFilter } from "@/lib/store";
 import {
   ISSUE_STATUS_LABEL,
@@ -50,6 +51,7 @@ const SEV_BADGE: Record<Issue["severity"], string> = {
 export function IssuesListPanel() {
   const { can } = useRole();
   const canRaise = can("raiseIssues");
+  const updateIssue = useDdStore((s) => s.updateIssue);
   const issues = useDdStore((s) => s.issues);
   const documents = useDdStore((s) => s.documents);
   const categories = useDdStore((s) => s.categories);
@@ -62,28 +64,101 @@ export function IssuesListPanel() {
   const [editing, setEditing] = useState<Issue | null>(null);
   const [reportFormat, setReportFormat] = useState<ReportFormat>("docx");
   const [formatOpen, setFormatOpen] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
 
-  function downloadReport() {
-    const preparedOn = new Date().toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
-    const report = buildIssueReport({
-      matter,
-      workspace,
-      preparedOn,
-      issues: reportIssues({
+  function trackerText(current: string, next: string) {
+    const cleaned = next.trim();
+    if (!cleaned) return current;
+    const limit = Math.max(current.length + 80, Math.ceil(current.length * 1.35));
+    if (current.trim() && cleaned.length > limit) return current;
+    return cleaned;
+  }
+
+  async function downloadReport() {
+    if (reportBusy) return;
+    setReportBusy(true);
+    try {
+      const preparedOn = new Date().toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+      let rows = reportIssues({
         issues,
         documents,
         categories,
         workspace,
         projectId,
-      }),
-    });
-    const extension = reportFormat === "pdf" ? "pdf" : "docx";
-    downloadIssueReport(`${slug}-issues-report.${extension}`, report, reportFormat);
-    toast("Issue report downloaded");
+      });
+      let corrected = 0;
+      try {
+        const result = await polishIssueReport({
+          data: {
+            projectId,
+            client: matter.client,
+            target: matter.target,
+            deal: matter.dealType,
+            issues: rows.map((issue) => ({
+              id: issue.id,
+              title: issue.title,
+              summary: issue.finding,
+              code: issue.code,
+              status: issue.status,
+              severity: issue.severity,
+              where: issue.where,
+            })),
+          },
+        });
+        if (result.ok && result.issues.length > 0) {
+          const byId = new Map(result.issues.map((issue) => [issue.id, issue]));
+          rows = rows.map((issue) => {
+            const next = byId.get(issue.id);
+            if (!next) return issue;
+            const title = trackerText(issue.title, next.title);
+            const finding = next.finding.trim() || issue.finding;
+            return { ...issue, title, finding };
+          });
+          if (canRaise) {
+            for (const issue of issues) {
+              const next = byId.get(issue.id);
+              if (!next) continue;
+              const title = trackerText(issue.title, next.title);
+              const summary = trackerText(issue.summary, next.summary);
+              if (title === issue.title && summary === issue.summary) continue;
+              updateIssue(issue.id, {
+                title,
+                summary,
+                severity: issue.severity,
+                categoryId: issue.categoryId,
+                documentId: issue.documentId,
+                codeSection: issue.codeSection,
+                roomFileId: issue.roomFileId,
+                roomFolderId: issue.roomFolderId,
+                roomFileName: issue.roomFileName,
+              });
+              corrected += 1;
+            }
+          }
+        }
+      } catch {
+        /* The report still downloads from the issues as written. */
+      }
+      const report = buildIssueReport({
+        matter,
+        workspace,
+        preparedOn,
+        issues: rows,
+      });
+      const extension = reportFormat === "pdf" ? "pdf" : "docx";
+      downloadIssueReport(`${slug}-issues-report.${extension}`, report, reportFormat);
+      toast(
+        corrected > 0
+          ? "Issue report downloaded. Typos were corrected on the issues list."
+          : "Issue report downloaded",
+      );
+    } finally {
+      setReportBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -127,11 +202,12 @@ export function IssuesListPanel() {
           <div className="inline-flex h-9 shrink-0 overflow-hidden rounded-md shadow-[var(--shadow-border)]">
             <button
               type="button"
-              onClick={downloadReport}
-              className="inline-flex items-center gap-2 px-3 text-sm font-medium text-ink hover:bg-paper-2"
+              onClick={() => void downloadReport()}
+              disabled={reportBusy}
+              className="inline-flex items-center gap-2 px-3 text-sm font-medium text-ink hover:bg-paper-2 disabled:opacity-40"
             >
               <FileDown className="size-4" />
-              Report
+              {reportBusy ? "Writing…" : "Report"}
               <span className="text-muted">{reportFormat === "pdf" ? "PDF" : "Word"}</span>
             </button>
             <Popover.Root open={formatOpen} onOpenChange={setFormatOpen}>

@@ -6,6 +6,7 @@ import { WORKSPACE_LABEL, type WorkspaceId } from "@/lib/workspace";
 const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
 
 export type ReportIssue = {
+  id: string;
   title: string;
   status: string;
   severity: string;
@@ -92,6 +93,7 @@ export function reportIssues(input: {
       const doc = input.documents.find((row) => row.id === issue.documentId);
       const category = input.categories.find((row) => row.id === issue.categoryId);
       return {
+        id: issue.id,
         title: issue.title,
         status: ISSUE_STATUS_LABEL[issue.status],
         severity: SEVERITY_LABEL[issue.severity],
