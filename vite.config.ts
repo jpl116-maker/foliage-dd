@@ -55,6 +55,7 @@ function finishVercelOutput() {
           launcherType: "Nodejs",
           shouldAddHelpers: false,
           supportsResponseStreaming: true,
+          maxDuration: 300,
         },
         null,
         2,

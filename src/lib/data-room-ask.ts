@@ -183,8 +183,11 @@ export const askDataRoom = createServerFn({ method: "POST" })
     if (readIds.length > 0) {
       const { readFileBytes } = await import("@/lib/data-room");
       const { extractRoomText } = await import("@/lib/room-text.server");
+      // grok-4.5 accepts 500k tokens. This stays inside that window so a
+      // hundreds-of-pages PDF is sent whole instead of being rejected.
+      const FILE_TEXT_BUDGET = 1_600_000;
       const blocks: string[] = [];
-      let remaining = 240_000;
+      let remaining = FILE_TEXT_BUDGET;
       for (const id of readIds) {
         const file = byId.get(id);
         if (!file || remaining <= 0) continue;
