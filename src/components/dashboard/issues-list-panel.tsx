@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { FileDown, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { IssueDeleteButton } from "@/components/dashboard/issue-delete-button";
 import { RaiseIssueDialog } from "@/components/dashboard/raise-issue-dialog";
 import { issueFileRef } from "@/lib/issue-file";
+import { downloadIssueReport, reportIssues, reportParagraphs } from "@/lib/issue-report";
 import { useDdStore, type IssueFilter } from "@/lib/store";
 import {
   ISSUE_STATUS_LABEL,
@@ -46,6 +47,7 @@ export function IssuesListPanel() {
   const issues = useDdStore((s) => s.issues);
   const documents = useDdStore((s) => s.documents);
   const categories = useDdStore((s) => s.categories);
+  const matter = useDdStore((s) => s.matter);
   const workspace = useDdStore((s) => s.workspace);
   const { slug, id: projectId } = useProject();
   const setIssueStatus = useDdStore((s) => s.setIssueStatus);
@@ -90,19 +92,51 @@ export function IssuesListPanel() {
             {closed} closed
           </p>
         </div>
-        {canRaise ? (
-        <Button
-          size="sm"
-          className="shrink-0"
-          onClick={() => {
-            setEditing(null);
-            setRaiseOpen(true);
-          }}
-        >
-          <Plus className="size-4" />
-          Raise
-        </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => {
+              const preparedOn = new Date().toLocaleDateString("en-US", {
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              });
+              const lines = reportParagraphs({
+                matter,
+                workspace,
+                preparedOn,
+                issues: reportIssues({
+                  issues,
+                  documents,
+                  categories,
+                  workspace,
+                  projectId,
+                }),
+              });
+              downloadIssueReport(`${slug}-issues-report.docx`, lines);
+              toast("Issue report downloaded");
+            }}
+          >
+            <FileDown className="size-4" />
+            Report
+          </Button>
+          {canRaise ? (
+          <Button
+            size="sm"
+            className="shrink-0"
+            onClick={() => {
+              setEditing(null);
+              setRaiseOpen(true);
+            }}
+          >
+            <Plus className="size-4" />
+            Raise
+          </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-1.5">
